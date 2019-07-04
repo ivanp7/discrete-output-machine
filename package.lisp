@@ -21,8 +21,8 @@
            :output-queue-push-position :output-queue-push-character
            :output-queue-push-positioned-character
            :output-buffer :make-output-buffer output-buffer-fsm-priority-fn
-           :initialize-cell-fsm :finalize-cell-fsm :fsm-visual-fn
-           :output-buffer-top-cell-occupant 
+           :output-buffer-queue :initialize-cell-fsm :finalize-cell-fsm 
+           :fsm-visual-fn :output-buffer-top-cell-occupant 
            :output-buffer-do-for-each-cell-occupant 
            :output-buffer-cell :output-buffer-add-cell :output-buffer-del-cell
            :output-buffer-cell-coord :advance-output-buffer))

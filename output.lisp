@@ -7,20 +7,18 @@
 (defmacro format-ansi-seq (stream control-string &rest args)
   `(format ,stream ,(format nil "~C[~A" #\Escape control-string) ,@args))
 
-(defmacro initialize-output (stream)
-  (alexandria:once-only (stream)
-    `(progn 
-       (format-ansi-seq ,stream "?1049h")
-       (format-ansi-seq ,stream "?25l")
-       (format-ansi-seq ,stream "2J")
-       (force-output ,stream))))
+(defmacro define-ansi-seq-macro (name &rest seqs)
+  `(defmacro ,name (stream)
+     (alexandria:once-only (stream)
+       `(progn 
+          ,,@(mapcar (lambda (seq)
+                       ``(format-ansi-seq ,stream ,,seq))
+                     seqs)
+          (force-output ,stream)))))
 
-(defmacro finalize-output (stream)
-  (alexandria:once-only (stream)
-    `(progn
-       (format-ansi-seq ,stream "?1049l")
-       (format-ansi-seq ,stream "?25h")
-       (force-output ,stream))))
+(define-ansi-seq-macro initialize-output "?1049h" "?25l" "2J")
+(define-ansi-seq-macro finalize-output "?1049l" "?25h")
+(define-ansi-seq-macro erase-output "2J")
 
 (defstruct colored-character
   (value #\Space :type character)
@@ -60,6 +58,7 @@
   (coords (make-queue) :type queue :read-only t)
   (cchars (make-queue) :type queue :read-only t)
   (lock (bt:make-lock) :type bt:lock :read-only t)
+  (clear-flag nil :type boolean)
   (stop-flag t :type boolean))
 
 (defun output-queue-screen-size (output-queue)
@@ -76,8 +75,13 @@
     (let ((stream (output-queue-stream output-queue)))
       (initialize-output stream)
       (loop
-        (when (output-queue-stop-flag output-queue) 
-          (return))
+        (cond 
+          ((output-queue-stop-flag output-queue)
+           (return))
+          ((output-queue-clear-flag output-queue)
+           (erase-output stream)
+           (setf (output-queue-clear-flag output-queue) nil)))
+
         (let ((coord (queue-pop (output-queue-coords output-queue)))
               (cchar (queue-pop (output-queue-cchars output-queue)))
               (screen-size (output-queue-screen-size output-queue))) 
@@ -86,6 +90,12 @@
             (write-colored-character stream coord cchar))))
       (finalize-output stream)
       t)))
+
+(defun output-queue-clear-screen (output-queue)
+  (setf (output-queue-clear-flag output-queue) t)  
+  (queue-push (output-queue-coords output-queue)) 
+  (queue-push (output-queue-cchars output-queue))
+  t)
 
 (defun output-queue-stop-loop (output-queue)
   (setf (output-queue-stop-flag output-queue) t)
