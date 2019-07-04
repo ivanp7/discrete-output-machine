@@ -31,6 +31,8 @@
 (defparameter *default-char* 
   (make-colored-character #\? :foreground 9 :background 16))
 
+(deftype coord () '(cons fixnum fixnum))
+
 (defmacro make-coord (x y)
   `(cons ,x ,y))
 
@@ -40,144 +42,202 @@
 (defmacro coord-y (coord)
   `(cdr ,coord))
 
-(defmacro write-colored-character (stream coord cc)
-  (alexandria:once-only (stream coord cc)
-    `(when ,cc
-       (format-ansi-seq ,stream "~A;~AH" 
-                        (1+ (coord-y ,coord)) (1+ (coord-x ,coord)))
-       (format-ansi-seq ,stream "38;5;~Am" (colored-character-foreground ,cc))
-       (format-ansi-seq ,stream "48;5;~Am" (colored-character-background ,cc))
-       (format ,stream "~C" (colored-character-value ,cc))
-       (force-output ,stream))))
+(defun write-colored-character (stream coord cchar)
+  (when (and coord cchar (>= (coord-x coord) 0) (>= (coord-y coord) 0))
+    (format-ansi-seq stream "~A;~AH" 
+                     (1+ (coord-y coord)) (1+ (coord-x coord)))
+    (format-ansi-seq stream "38;5;~Am" (colored-character-foreground cchar))
+    (format-ansi-seq stream "48;5;~Am" (colored-character-background cchar))
+    (format stream "~C" (colored-character-value cchar))
+    (force-output stream)))
 
-(deftype output-queue () '(cons queue queue))
+;;;----------------------------------------------------------------------------
 
-(defun make-output-queue (&optional (stream *standard-output*))
-  (let ((queue (cons (make-queue) (make-queue))) stop-flag)
-    (values queue
-            (lambda ()
-              (initialize-output stream)
-              (loop
-                (when stop-flag (return))
-                (write-colored-character stream 
-                                         (queue-pop (car queue)) 
-                                         (queue-pop (cdr queue))))
-              (finalize-output stream)
-              t)
-            (lambda ()
-              (setf stop-flag t)
-              (queue-push (car queue))
-              (queue-push (cdr queue))
-              t))))
+(defstruct output-queue
+  (screen-size (make-coord 80 24) :type coord)
+  (ss-lock (bt:make-lock) :type bt:lock)
+  (stream *standard-output* :type stream)
+  (coords (make-queue) :type queue)
+  (cchars (make-queue) :type queue)
+  (lock (bt:make-lock) :type bt:lock)
+  (stop-flag t :type boolean))
 
-(defun output-character (output-queue coord cc)
-  (queue-push (car output-queue) coord)
-  (queue-push (cdr output-queue) cc)
+(defun output-queue-get-screen-size (output-queue)
+  (bt:with-lock-held ((output-queue-ss-lock output-queue))
+    (output-queue-screen-size output-queue)))
+
+(defun output-queue-set-screen-size (output-queue new-size)
+  (bt:with-lock-held ((output-queue-ss-lock output-queue))
+    (setf (output-queue-screen-size output-queue) new-size)))
+
+(defun output-queue-loop (output-queue)
+  (when (output-queue-stop-flag output-queue)
+    (setf (output-queue-stop-flag output-queue) nil)
+    (let ((stream (output-queue-stream output-queue)))
+      (initialize-output stream)
+      (loop
+        (when (output-queue-stop-flag output-queue) 
+          (return))
+        (let ((coord (queue-pop (output-queue-coords output-queue)))
+              (cchar (queue-pop (output-queue-cchars output-queue)))
+              (screen-size (output-queue-get-screen-size output-queue))) 
+          (when (and (< (coord-x coord) (coord-x screen-size))
+                     (< (coord-y coord) (coord-y screen-size))) 
+            (write-colored-character stream coord cchar))))
+      (finalize-output stream)
+      t)))
+
+(defun output-queue-stop-loop (output-queue)
+  (setf (output-queue-stop-flag output-queue) t)
+  (queue-push (output-queue-coords output-queue)) 
+  (queue-push (output-queue-cchars output-queue))
+  t)
+
+(defun output-queue-push-position (output-queue coord)
+  (queue-push (output-queue-coords output-queue) coord) 
+  t)
+
+(defun output-queue-push-character (output-queue cchar)
+  (queue-push (output-queue-cchars output-queue) cchar) 
+  t)
+
+(defun output-queue-push-positioned-character (output-queue coord cchar)
+  (bt:with-lock-held ((output-queue-lock output-queue))
+    (queue-push (output-queue-coords output-queue) coord) 
+    (queue-push (output-queue-cchars output-queue) cchar))
   t)
 
 ;;;----------------------------------------------------------------------------
 
+(defstruct cell-occupants
+  (list nil :type list)
+  (lock (bt:make-lock) :type bt:lock))
+
+(defun cell-occupants-add (occupants fsm)
+  (bt:with-lock-held ((cell-occupants-lock occupants))
+    (push fsm (cell-occupants-list occupants))))
+
+(defun cell-occupants-del (occupants fsm)
+  (bt:with-lock-held ((cell-occupants-lock occupants))
+    (alexandria:deletef (cell-occupants-list occupants) fsm :test #'eq)))
+
+(defun cell-occupants-find-top (occupants priority-fn)
+  (bt:with-lock-held ((cell-occupants-lock occupants))
+    (reduce (lambda (fsm1 fsm2)
+              (if (funcall priority-fn fsm1 fsm2) fsm2 fsm1))
+            (cell-occupants-list occupants))))
+
+(defun cell-occupants-do-for-each (occupants fn)
+  (bt:with-lock-held ((cell-occupants-lock occupants))
+    (dolist (fsm (cell-occupants-list occupants))
+      (funcall fn fsm))))
+
+;;;----------------------------------------------------------------------------
+
 (defstruct output-buffer
-  (fsm-table (make-fsm-table) :type fsm-table)
-  (cell-occupants-table (make-hash-table :test 'equal) :type hash-table)
-  (cell-priority-fn (constantly nil) :type (function (fsm fsm) boolean))
-  (queue (error "Output queue must be assigned to a new output buffer")
-         :type (or null output-queue)))
+  (key-table (make-fsm-table) :type fsm-table)
+  (coord-table (make-hash-table :test 'equal) :type hash-table)
+  (coord-table-lock (bt:make-lock) :type bt:lock)
+  (fsm-priority-fn (constantly nil) :type (function (fsm fsm) boolean))
+  (queue (make-output-queue) :type output-queue))
 
-(defmacro output-buffer-coord-occupants (buffer coord)
-  (alexandria:once-only (buffer coord)
-    `(gethash ,coord (output-buffer-cell-occupants-table ,buffer))))
+(defun initialize-cell-fsm (fsm initial-coord visual-fn)
+  (fsm-info-add fsm :coord initial-coord)
+  (fsm-indo-add fsm :new-coord nil)
+  (fsm-info-add fsm :visual-fn visual-fn)
+  t)
 
-(defsetf output-buffer-coord-occupants (buffer coord) (new-list)
-  `(setf (gethash ,coord (output-buffer-cell-occupants-table ,buffer)) 
-         ,new-list))
-
-(defmacro output-buffer-add-coord-occupant (buffer coord fsm)
-  (alexandria:once-only (buffer coord fsm)
-    `(push ,fsm (output-buffer-coord-occupants ,buffer ,coord))))
-
-(defmacro output-buffer-del-coord-occupant (buffer coord fsm)
-  (alexandria:once-only (buffer coord fsm)
-    `(alexandria:deletef (output-buffer-coord-occupants ,buffer ,coord)
-                         ,fsm :test #'eq)))
-
-(defun find-top-occupant (buffer coord)
-  (reduce (lambda (fsm1 fsm2)
-            (if (funcall (output-buffer-cell-priority-fn buffer) fsm1 fsm2) 
-              fsm2 fsm1))
-          (output-buffer-coord-occupants buffer coord)))
-
-(defmacro top-occupant-p (buffer coord occupant)
-  `(eq (find-top-occupant ,buffer ,coord) ,occupant))
-
-(defun output-buffer-visualize-coord (buffer coord)
-  (output-character 
-    (output-buffer-queue buffer) coord
-    (alexandria:if-let ((fsm (find-top-occupant buffer coord)))
-      (alexandria:if-let ((visual-fn (fsm-info-get fsm :visual-fn)))
-        (funcall visual-fn fsm)
-        *default-char*)
-      *blank-char*)))
+(defun finalize-cell-fsm (fsm)
+  (fsm-info-del fsm :coord)
+  (fsm-info-del fsm :new-coord)
+  (fsm-info-del fsm :visual-fn)
+  t)
 
 (defmacro fsm-coord (fsm)
   `(fsm-info-get ,fsm :coord))
 
+(defmacro fsm-new-coord (fsm)
+  `(fsm-info-get ,fsm :new-coord))
+
+(defmacro fsm-visual-fn (fsm)
+  `(fsm-info-get ,fsm :visual-fn))
+
+(defun output-buffer-cell-occupants (buffer coord)
+  (bt:with-lock-held ((output-buffer-coord-table-lock buffer))
+    (alexandria:ensure-gethash coord (output-buffer-coord-table buffer)
+                               (make-cell-occupants))))
+
+(defmacro output-buffer-top-cell-occupant (buffer coord)
+  (alexandria:once-only (buffer) 
+    `(cell-occupants-find-top (output-buffer-cell-occupants ,buffer ,coord)
+                              (output-buffer-fsm-priority-fn ,buffer))))
+
+(defmacro output-buffer-do-for-each-cell-occupant (buffer coord fn)
+  `(cell-occupants-do-for-each (output-buffer-cell-occupants ,buffer ,coord)
+                               ,fn))
+
+(defun output-buffer-visualize-coord (buffer coord)
+  (output-queue-push-positioned-character
+    (output-buffer-queue buffer) coord
+    (alexandria:if-let ((fsm (output-buffer-top-cell-occupant buffer coord)))
+      (alexandria:if-let ((visual-fn (fsm-visual-fn fsm)))
+        (funcall visual-fn fsm)
+        *default-char*)
+      *blank-char*)))
+
 (defun output-buffer-visualize-fsm (buffer fsm)
   (let ((coord (fsm-coord fsm)))
-    (when (top-occupant-p buffer coord fsm)
-      (output-character 
+    (when (eq fsm (output-buffer-top-cell-occupant buffer coord))
+      (output-queue-push-positioned-character
         (output-buffer-queue buffer) coord
-        (alexandria:if-let ((visual-fn (fsm-info-get fsm :visual-fn)))
+        (alexandria:if-let ((visual-fn (fsm-visual-fn fsm)))
           (funcall visual-fn fsm)
           *default-char*)))))
 
-(defmacro output-buffer-cell-fsm (buffer key)
-  `(fsm-table-entry (output-buffer-fsm-table ,buffer) ,key))
+(defmacro output-buffer-cell (buffer key)
+  `(fsm-table-entry (output-buffer-key-table ,buffer) ,key))
 
-(defun output-buffer-add-cell (buffer key fsm coord)
-  (setf (fsm-coord fsm) coord)
-  (fsm-table-add-entry (output-buffer-fsm-table buffer) key fsm)
-  (output-buffer-add-coord-occupant buffer coord fsm)
-  (output-buffer-visualize-fsm buffer fsm)
+(defun output-buffer-add-cell (buffer fsm)
+  (fsm-table-add-entry (output-buffer-key-table buffer) fsm)
   t)
 
 (defun output-buffer-del-cell (buffer key)
-  (let ((fsm (output-buffer-cell-fsm buffer key)))
-    (when fsm
-      (let ((coord (fsm-coord fsm)))
-        (output-buffer-del-coord-occupant buffer coord fsm)
-        (output-buffer-visualize-coord buffer coord))
-      (fsm-table-del-entry (output-buffer-fsm-table buffer) key)
-      (fsm-info-del fsm :coord)
+  (alexandria:if-let ((fsm (output-buffer-cell buffer key)))
+    (progn
+      (fsm-table-del-entry (output-buffer-key-table buffer) key)
       t)))
 
-(defsetf output-buffer-cell-fsm (buffer key) (new-fsm)
-  `(alexandria:if-let ((fsm (output-buffer-cell-fsm ,buffer ,key)))
-     (let ((coord (fsm-coord fsm)))
-       (output-buffer-del-coord-occupant ,buffer coord fsm)
-       (fsm-info-del fsm :coord)
-       (setf (fsm-coord ,new-fsm) coord)
-       (setf (fsm-table-entry (output-buffer-fsm-table ,buffer) ,key) ,new-fsm)
-       (output-buffer-add-coord-occupant ,buffer coord ,new-fsm)
-       (output-buffer-visualize-coord ,buffer coord)
-       ,new-fsm)
-     (error "No cell with key ~A is in the buffer" key)))
+(defun output-buffer-cell-coord (buffer key)
+  (fsm-coord (output-buffer-cell buffer key)))
 
 (defun output-buffer-move-cell (buffer key new-coord)
-  (let ((fsm (output-buffer-cell-fsm buffer key)))
-    (when fsm
-      (let ((coord (fsm-coord fsm)))
-        (when (equal coord new-coord)
-          (return-from output-buffer-move-cell t))
-        (output-buffer-del-coord-occupant buffer coord fsm)
-        (output-buffer-visualize-coord buffer coord))
-      (setf (fsm-info-get fsm :coord) new-coord)
-      (output-buffer-add-coord-occupant buffer coord fsm)
-      (output-buffer-visualize-fsm buffer fsm)
-      t)))
+  (alexandria:if-let ((fsm (output-buffer-cell buffer key)))
+    (let ((coord (fsm-coord fsm)))
+      (unless (equal coord new-coord)
+        (setf (fsm-new-coord fsm) new-coord)))))
 
 (defun advance-output-buffer (buffer)
-  (advance-fsm-table (output-buffer-fsm-table buffer)
-    (when (fsm-state-changed-p fsm)
-      (output-buffer-visualize-fsm buffer fsm))))
+  (advance-fsm-table 
+    (output-buffer-key-table buffer)
+    :del-fn (lambda (key)
+              (alexandria:if-let ((fsm (output-buffer-cell buffer key)))
+                (let ((coord (fsm-coord fsm)))
+                  (cell-occupants-del 
+                    (output-buffer-cell-occupants buffer coord) fsm)
+                  (output-buffer-visualize-coord buffer coord))))
+    :add-fn (lambda (fsm)
+              (cell-occupants-add
+                (output-buffer-cell-occupants buffer (fsm-coord fsm)) fsm)
+              (output-buffer-visualize-fsm buffer fsm))
+    :advance-fn (lambda (key fsm)
+                  (let (update-needed (coord (fsm-coord fsm))) 
+                    (when (fsm-new-coord fsm)
+                      (setf (fsm-coord fsm) (fsm-new-coord fsm)
+                            (fsm-new-coord fsm) nil
+                            update-needed t)
+                      (output-buffer-visualize-coord buffer coord))
+                    (when (fsm-state-changed-p fsm)
+                      (setf update-needed t))
+                    (when update-needed
+                      (output-buffer-visualize-fsm buffer fsm))))))
 

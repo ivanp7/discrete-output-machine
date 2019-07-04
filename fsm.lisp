@@ -10,12 +10,13 @@
                                                     (state-type 'keyword))
                                      &body state-transfer)
   `(let ((state ,initial-state) next-state old-state (info ,info))
-     (declare (type ,state-type state next-state old-state))
+     (declare (type ,state-type state)
+              (type (or null ,state-type) next-state old-state))
      (lambda (op &optional input-data)
        (declare (type keyword op))
        (ecase op
          (:get state)
-         (:set (setf next-state (the ,state-type input-data)))
+         (:set (setf next-state (the (or null ,state-type) input-data)))
          (:calc
            (let ((info info))
              ,@state-transfer)
@@ -54,50 +55,75 @@
 
 (defun fsm-info-add (fsm key value)
   (push (cons key value) (fsm-info fsm))
-  value)
+  key)
 
 (defun fsm-info-del (fsm key)
-  (if (eql key (car (first (fsm-info fsm))))
-    (setf (fsm-info fsm) (rest (fsm-info fsm)))
-    (loop :for rst :on (fsm-info fsm) :do
-          (when (eql key (car (second rst)))
-            (setf (rest rst) (rest (rest rst)))
-            (return)))))
+  (alexandria:deletef (fsm-info fsm) key :key #'car :test #'eql)
+  key)
 
 (defun fsm-info-get (fsm key &optional default)
   (alexandria:if-let ((c (assoc key (fsm-info fsm))))
     (cdr c)
     default))
 
-(defsetf fsm-info-get (fsm key) (new-value)
-  `(alexandria:if-let ((c (assoc ,key (fsm-info ,fsm)))) 
-     (setf (cdr c) ,new-value)
-     (fsm-info-add ,fsm ,key ,new-value)))
+(defsetf fsm-info-get (fsm key &optional default) (new-value)
+  `(locally
+     (declare (ignore ,default))
+     (alexandria:if-let ((c (assoc ,key (fsm-info ,fsm)))) 
+       (setf (cdr c) ,new-value)
+       (progn
+         (fsm-info-add ,fsm ,key ,new-value)
+         ,new-value))))
 
 ;;;----------------------------------------------------------------------------
 
-(defmacro make-fsm-table ()
-  `(make-hash-table :test 'equal))
+(defstruct fsm-table
+  (itself (make-hash-table :test 'equal) :type hash-table)
+  (addition-queue (make-queue) :type queue)
+  (deletion-queue (make-queue) :type queue))
+
+(defmacro fsm-key (fsm)
+  `(fsm-info-get ,fsm :table-key (error "No table key assigned to a FSM")))
+
+(defmacro fsm-table-add-entry-now (table fsm)
+  (alexandria:once-only (table fsm)
+    `(setf (gethash (fsm-key ,fsm) (fsm-table-itself ,table)) ,fsm)))
+
+(defmacro fsm-table-del-entry-now (table key)
+  (alexandria:once-only (table key)
+    `(remhash ,key (fsm-table-itself ,table))))
+
+(defun fsm-table-add-entry (table fsm)
+  (queue-push (fsm-table-addition-queue table) fsm))
+
+(defun fsm-table-del-entry (table key)
+  (queue-push (fsm-table-deletion-queue table) key))
 
 (defmacro fsm-table-entry (table key)
   (alexandria:once-only (table key)
-    `(gethash ,key ,table)))
+    `(gethash ,key (fsm-table-itself ,table))))
 
 (defsetf fsm-table-entry (table key) (new-fsm)
-  `(setf (gethash ,key ,table) ,new-fsm))
+  `(progn
+     (fsm-table-del-entry ,table ,key)
+     (fsm-table-add-entry ,table ,new-fsm)))
 
-(defmacro fsm-table-add-entry (table key fsm)
-  `(setf (fsm-table-entry ,table ,key) ,fsm))
-
-(defmacro fsm-table-del-entry (table key)
-  (alexandria:once-only (table key)
-    `(remhash ,key ,table)))
-
-(defmacro advance-fsm-table (table &body post-advance-forms)
-  (alexandria:once-only (table)
-    `(maphash (lambda (key fsm)
-                (declare (ignorable key))
-                (advance-fsm fsm)
-                ,@post-advance-forms)
-              ,table)))
+(defun advance-fsm-table (table &key (del-fn (constantly nil))
+                                (add-fn (constantly nil))
+                                (advance-fn (constantly nil)))
+  (consume-queue (fsm-table-deletion-queue table)
+                 (lambda (key)
+                   (alexandria:if-let ((fsm (fsm-table-entry table key)))
+                     (progn
+                       (funcall del-fn key)
+                       (fsm-table-del-entry-now table key)))))
+  (consume-queue (fsm-table-addition-queue table)
+                 (lambda (fsm)
+                   (funcall add-fn fsm)
+                   (fsm-table-add-entry-now table fsm)))
+  (maphash (lambda (key fsm)
+             (advance-fsm fsm)
+             (funcall advance-fn key fsm))
+           (fsm-table-itself table))
+  t)
 

@@ -41,3 +41,9 @@
         (when (queue-empty-p queue)
           (setf (queue-last queue) nil))))))
 
+(defun consume-queue (queue fn)
+  (loop
+    (when (queue-empty-p queue)
+      (return))
+    (funcall fn (queue-pop queue))))
+
