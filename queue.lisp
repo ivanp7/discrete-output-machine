@@ -2,14 +2,14 @@
 ;;
 ;;;; Copyright (c) 2019 Ivan Podmazov
 
-(in-package #:workers-2d)
+(in-package #:discrete-output-machine)
 
 (defstruct queue
   (list nil :type list)
   (last nil :type list)
   (empty-value nil)
-  (lock (bt:make-lock) :type bt:lock)
-  (condition-variable (bt:make-condition-variable)))
+  (lock (bt:make-lock) :type bt:lock :read-only t)
+  (condition-variable (bt:make-condition-variable) :read-only t))
 
 (defmacro queue-head (queue)
   `(car (queue-list ,queue)))

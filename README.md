@@ -1,4 +1,4 @@
-# workers-2d
+# discrete-output-machine
 ### _Ivan Podmazov_
 
 This is a project to do ... something.

@@ -2,7 +2,7 @@
 ;;
 ;;;; Copyright (c) 2019 Ivan Podmazov
 
-(in-package #:workers-2d)
+(in-package #:discrete-output-machine)
 
 (defmacro format-ansi-seq (stream control-string &rest args)
   `(format ,stream ,(format nil "~C[~A" #\Escape control-string) ,@args))
@@ -54,21 +54,21 @@
 ;;;----------------------------------------------------------------------------
 
 (defstruct output-queue
-  (screen-size (make-coord 80 24) :type coord)
-  (ss-lock (bt:make-lock) :type bt:lock)
-  (stream *standard-output* :type stream)
-  (coords (make-queue) :type queue)
-  (cchars (make-queue) :type queue)
-  (lock (bt:make-lock) :type bt:lock)
+  (size (make-coord 80 24) :type coord)
+  (size-lock (bt:make-lock) :type bt:lock :read-only t)
+  (stream *standard-output* :type stream :read-only t)
+  (coords (make-queue) :type queue :read-only t)
+  (cchars (make-queue) :type queue :read-only t)
+  (lock (bt:make-lock) :type bt:lock :read-only t)
   (stop-flag t :type boolean))
 
-(defun output-queue-get-screen-size (output-queue)
-  (bt:with-lock-held ((output-queue-ss-lock output-queue))
-    (output-queue-screen-size output-queue)))
+(defun output-queue-screen-size (output-queue)
+  (bt:with-lock-held ((output-queue-size-lock output-queue))
+    (output-queue-size output-queue)))
 
-(defun output-queue-set-screen-size (output-queue new-size)
-  (bt:with-lock-held ((output-queue-ss-lock output-queue))
-    (setf (output-queue-screen-size output-queue) new-size)))
+(defsetf output-queue-screen-size (output-queue) (new-size)
+  `(bt:with-lock-held ((output-queue-size-lock ,output-queue))
+     (setf (output-queue-size ,output-queue) ,new-size)))
 
 (defun output-queue-loop (output-queue)
   (when (output-queue-stop-flag output-queue)
@@ -80,7 +80,7 @@
           (return))
         (let ((coord (queue-pop (output-queue-coords output-queue)))
               (cchar (queue-pop (output-queue-cchars output-queue)))
-              (screen-size (output-queue-get-screen-size output-queue))) 
+              (screen-size (output-queue-screen-size output-queue))) 
           (when (and (< (coord-x coord) (coord-x screen-size))
                      (< (coord-y coord) (coord-y screen-size))) 
             (write-colored-character stream coord cchar))))
@@ -111,7 +111,7 @@
 
 (defstruct cell-occupants
   (list nil :type list)
-  (lock (bt:make-lock) :type bt:lock))
+  (lock (bt:make-lock) :type bt:lock :read-only t))
 
 (defun cell-occupants-add (occupants fsm)
   (bt:with-lock-held ((cell-occupants-lock occupants))
@@ -135,11 +135,11 @@
 ;;;----------------------------------------------------------------------------
 
 (defstruct output-buffer
-  (key-table (make-fsm-table) :type fsm-table)
-  (coord-table (make-hash-table :test 'equal) :type hash-table)
-  (coord-table-lock (bt:make-lock) :type bt:lock)
+  (key-table (make-fsm-table) :type fsm-table :read-only t)
+  (coord-table (make-hash-table :test 'equal) :type hash-table :read-only t)
+  (coord-table-lock (bt:make-lock) :type bt:lock :read-only t)
   (fsm-priority-fn (constantly nil) :type (function (fsm fsm) boolean))
-  (queue (make-output-queue) :type output-queue))
+  (queue (make-output-queue) :type output-queue :read-only t))
 
 (defun initialize-cell-fsm (fsm initial-coord visual-fn)
   (fsm-info-add fsm :coord initial-coord)
@@ -176,7 +176,7 @@
   `(cell-occupants-do-for-each (output-buffer-cell-occupants ,buffer ,coord)
                                ,fn))
 
-(defun output-buffer-visualize-coord (buffer coord)
+(defun output-buffer-draw-coord (buffer coord)
   (output-queue-push-positioned-character
     (output-buffer-queue buffer) coord
     (alexandria:if-let ((fsm (output-buffer-top-cell-occupant buffer coord)))
@@ -185,7 +185,7 @@
         *default-char*)
       *blank-char*)))
 
-(defun output-buffer-visualize-fsm (buffer fsm)
+(defun output-buffer-draw-fsm (buffer fsm)
   (let ((coord (fsm-coord fsm)))
     (when (eq fsm (output-buffer-top-cell-occupant buffer coord))
       (output-queue-push-positioned-character
@@ -210,34 +210,28 @@
 (defun output-buffer-cell-coord (buffer key)
   (fsm-coord (output-buffer-cell buffer key)))
 
-(defun output-buffer-move-cell (buffer key new-coord)
-  (alexandria:if-let ((fsm (output-buffer-cell buffer key)))
-    (let ((coord (fsm-coord fsm)))
-      (unless (equal coord new-coord)
-        (setf (fsm-new-coord fsm) new-coord)))))
+(defsetf output-buffer-cell-coord (buffer key) (new-coord)
+  `(alexandria:if-let ((fsm (output-buffer-cell ,buffer ,key)))
+     (let ((coord (fsm-coord fsm)))
+       (unless (equal coord ,new-coord)
+         (setf (fsm-new-coord fsm) ,new-coord)))))
 
 (defun advance-output-buffer (buffer)
-  (advance-fsm-table 
-    (output-buffer-key-table buffer)
-    :del-fn (lambda (key)
-              (alexandria:if-let ((fsm (output-buffer-cell buffer key)))
-                (let ((coord (fsm-coord fsm)))
-                  (cell-occupants-del 
-                    (output-buffer-cell-occupants buffer coord) fsm)
-                  (output-buffer-visualize-coord buffer coord))))
-    :add-fn (lambda (fsm)
-              (cell-occupants-add
-                (output-buffer-cell-occupants buffer (fsm-coord fsm)) fsm)
-              (output-buffer-visualize-fsm buffer fsm))
-    :advance-fn (lambda (key fsm)
-                  (let (update-needed (coord (fsm-coord fsm))) 
-                    (when (fsm-new-coord fsm)
-                      (setf (fsm-coord fsm) (fsm-new-coord fsm)
-                            (fsm-new-coord fsm) nil
-                            update-needed t)
-                      (output-buffer-visualize-coord buffer coord))
-                    (when (fsm-state-changed-p fsm)
-                      (setf update-needed t))
-                    (when update-needed
-                      (output-buffer-visualize-fsm buffer fsm))))))
+  (advance-fsm-table (output-buffer-key-table buffer)
+    ((let ((coord (fsm-coord fsm)))
+       (cell-occupants-del (output-buffer-cell-occupants buffer coord) fsm)
+       (output-buffer-draw-coord buffer coord)))
+    ((cell-occupants-add
+       (output-buffer-cell-occupants buffer (fsm-coord fsm)) fsm)
+     (output-buffer-draw-fsm buffer fsm))
+    ((let (redraw-needed (coord (fsm-coord fsm))) 
+       (when (fsm-new-coord fsm)
+         (setf (fsm-coord fsm) (fsm-new-coord fsm)
+               (fsm-new-coord fsm) nil
+               redraw-needed t)
+         (output-buffer-draw-coord buffer coord))
+       (when (fsm-state-changed-p fsm)
+         (setf redraw-needed t))
+       (when redraw-needed
+         (output-buffer-draw-fsm buffer fsm))))))
 

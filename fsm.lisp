@@ -2,7 +2,7 @@
 ;;
 ;;;; Copyright (c) 2019 Ivan Podmazov
 
-(in-package #:workers-2d)
+(in-package #:discrete-output-machine)
 
 (deftype fsm () `(function (keyword &optional *) *))
 
@@ -77,13 +77,13 @@
 
 ;;;----------------------------------------------------------------------------
 
-(defstruct fsm-table
-  (itself (make-hash-table :test 'equal) :type hash-table)
-  (addition-queue (make-queue) :type queue)
-  (deletion-queue (make-queue) :type queue))
-
 (defmacro fsm-key (fsm)
   `(fsm-info-get ,fsm :table-key (error "No table key assigned to a FSM")))
+
+(defstruct fsm-table
+  (itself (make-hash-table :test 'equal) :type hash-table :read-only t)
+  (addition-queue (make-queue) :type queue :read-only t)
+  (deletion-queue (make-queue) :type queue :read-only t))
 
 (defmacro fsm-table-add-entry-now (table fsm)
   (alexandria:once-only (table fsm)
@@ -108,22 +108,24 @@
      (fsm-table-del-entry ,table ,key)
      (fsm-table-add-entry ,table ,new-fsm)))
 
-(defun advance-fsm-table (table &key (del-fn (constantly nil))
-                                (add-fn (constantly nil))
-                                (advance-fn (constantly nil)))
-  (consume-queue (fsm-table-deletion-queue table)
-                 (lambda (key)
-                   (alexandria:if-let ((fsm (fsm-table-entry table key)))
-                     (progn
-                       (funcall del-fn key)
-                       (fsm-table-del-entry-now table key)))))
-  (consume-queue (fsm-table-addition-queue table)
-                 (lambda (fsm)
-                   (funcall add-fn fsm)
-                   (fsm-table-add-entry-now table fsm)))
-  (maphash (lambda (key fsm)
-             (advance-fsm fsm)
-             (funcall advance-fn key fsm))
-           (fsm-table-itself table))
-  t)
+(defmacro advance-fsm-table (table (&body del-forms) (&body add-forms)
+                                   (&body advance-forms))
+  (alexandria:once-only (table)
+    `(progn
+       (consume-queue 
+         (fsm-table-deletion-queue ,table)
+         (lambda (key)
+           (alexandria:if-let ((fsm (fsm-table-entry ,table key)))
+             (progn
+               ,@del-forms
+               (fsm-table-del-entry-now ,table key)))))
+       (consume-queue 
+         (fsm-table-addition-queue ,table)
+         (lambda (fsm)
+           ,@add-forms
+           (fsm-table-add-entry-now ,table fsm)))
+       (maphash (lambda (key fsm)
+                  (advance-fsm fsm)
+                  ,@advance-forms)
+                (fsm-table-itself ,table)))))
 

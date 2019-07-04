@@ -1,16 +1,16 @@
-;;;; workers-2d.asd
+;;;; discrete-output-machine.asd
 ;;
 ;;;; Copyright (c) 2019 Ivan Podmazov
 
-(asdf:defsystem #:workers-2d
-  :description "2D workers model for multiagent system testing"
+(asdf:defsystem #:discrete-output-machine
+  :description "Finite state machine table for output"
   :author "Ivan Podmazov"
   :license  "GNU/GPLv2"
   :version "0.0.1"
-  :depends-on (#:alexandria #:bordeaux-threads #:usocket #:trivial-signal)
+  :depends-on (#:alexandria #:bordeaux-threads)
   :serial t
   :components ((:file "package")
-               (:file "fsm" :depends-on ("package"))
                (:file "queue" :depends-on ("package"))
+               (:file "fsm" :depends-on ("queue"))
                (:file "output" :depends-on ("queue" "fsm"))))
 
