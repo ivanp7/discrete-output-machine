@@ -66,14 +66,13 @@
     (cdr c)
     default))
 
-(defsetf fsm-info-get (fsm key &optional default) (new-value)
-  `(locally
-     (declare (ignore ,default))
-     (alexandria:if-let ((c (assoc ,key (fsm-info ,fsm)))) 
-       (setf (cdr c) ,new-value)
-       (progn
-         (fsm-info-add ,fsm ,key ,new-value)
-         ,new-value))))
+(defun (setf fsm-info-get) (new-value fsm key &optional default)
+  (declare (ignore default))
+  (alexandria:if-let ((c (assoc key (fsm-info fsm)))) 
+    (setf (cdr c) new-value)
+    (progn
+      (fsm-info-add fsm key new-value)
+      new-value)))
 
 ;;;----------------------------------------------------------------------------
 

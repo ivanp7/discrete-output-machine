@@ -66,9 +66,9 @@
   (bt:with-lock-held ((output-queue-size-lock output-queue))
     (output-queue-size output-queue)))
 
-(defsetf output-queue-screen-size (output-queue) (new-size)
-  `(bt:with-lock-held ((output-queue-size-lock ,output-queue))
-     (setf (output-queue-size ,output-queue) ,new-size)))
+(defun (setf output-queue-screen-size) (new-size output-queue)
+  (bt:with-lock-held ((output-queue-size-lock output-queue))
+    (setf (output-queue-size output-queue) new-size)))
 
 (defun output-queue-loop (output-queue)
   (when (output-queue-stop-flag output-queue)
@@ -210,11 +210,11 @@
 (defun output-buffer-cell-coord (buffer key)
   (fsm-coord (output-buffer-cell buffer key)))
 
-(defsetf output-buffer-cell-coord (buffer key) (new-coord)
-  `(alexandria:if-let ((fsm (output-buffer-cell ,buffer ,key)))
-     (let ((coord (fsm-coord fsm)))
-       (unless (equal coord ,new-coord)
-         (setf (fsm-new-coord fsm) ,new-coord)))))
+(defun (setf output-buffer-cell-coord) (new-coord buffer key)
+  (alexandria:if-let ((fsm (output-buffer-cell buffer key)))
+    (let ((coord (fsm-coord fsm)))
+      (unless (equal coord new-coord)
+        (setf (fsm-new-coord fsm) new-coord)))))
 
 (defun advance-output-buffer (buffer)
   (advance-fsm-table (output-buffer-key-table buffer)
