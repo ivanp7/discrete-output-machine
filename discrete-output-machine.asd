@@ -3,14 +3,13 @@
 ;;;; Copyright (c) 2019 Ivan Podmazov
 
 (asdf:defsystem #:discrete-output-machine
-  :description "Finite state machine table for output"
+  :description "Abstraction layer to make creation of terminal apps easy."
   :author "Ivan Podmazov"
   :license  "GNU/GPLv2"
   :version "0.0.1"
   :depends-on (#:alexandria #:bordeaux-threads)
   :serial t
   :components ((:file "package")
-               (:file "queue" :depends-on ("package"))
-               (:file "fsm" :depends-on ("queue"))
-               (:file "output" :depends-on ("queue" "fsm"))))
+               (:file "terminal-io" :depends-on ("package"))
+               (:file "discrete-output-machine" :depends-on ("terminal-io"))))
 

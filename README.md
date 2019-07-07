@@ -2,8 +2,8 @@
 
 *discrete-output-machine* is an abstraction layer to make creation of terminal 
 applications easy. The screen is represented with a hash table of movable 
-cells, each of them being a finite state machine with assigned coordinates and
-a state-to-character visualization function.
+cells, each of them having associated with a tuple of properties. 
+Changes of properties are reflected on the screen on-the-fly.
 
 ## License
 
