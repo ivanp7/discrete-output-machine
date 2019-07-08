@@ -7,6 +7,7 @@
   (:nicknames #:dom)
   (:export :format/ansi-sequence :format/initialize :format/finalize
            :format/position+color :format/position+color+character
+           :define-lambda-object
            :*default-cell-x* :*default-cell-y* 
            :*default-cell-chr* :*default-cell-fg* :*default-cell-bg* 
            :*default-cell-visibility* :*default-cell-buffer*

@@ -6,7 +6,7 @@
 
 (defmacro define-lambda-object (type &key parameters bindings
                                      init-form getters setters post-form)
-  (alexandria:with-gensyms (lock)
+  (alexandria:with-gensyms (self-key lock)
     `(progn
        (defun ,(alexandria:symbolicate "MAKE-" type) (,@parameters)
          (let ((,lock (bt:make-lock)) self)
@@ -34,8 +34,8 @@
                                        (setf ,(alexandria:symbolicate getter)
                                              value))))
                                  setters)
-                             (:self (unless self (setf self value)))))))))
-               (funcall obj :self obj)
+                             (,self-key (setf self value))))))))
+               (funcall obj ,self-key obj)
                ,post-form
                obj))))
        ,@(mapcar 
