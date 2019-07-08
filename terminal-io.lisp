@@ -7,23 +7,32 @@
 (defmacro format/ansi-sequence (stream control-string &rest args)
   `(format ,stream ,(format nil "~C[~A" #\Escape control-string) ,@args))
 
-(defun format/initialize (stream)
-  (format/ansi-sequence "?1049h")
-  (format/ansi-sequence "?25l")
-  (format/ansi-sequence "2J"))
+(defun hide-cursor (stream)
+  (format/ansi-sequence "?25l"))
 
-(defun format/finalize (stream)
-  (format/ansi-sequence "2J")
-  (format/ansi-sequence "?25h")
+(defun show-cursor (stream)
+  (format/ansi-sequence "?25h"))
+
+(defun enable-alternative-screen (stream)
+  (format/ansi-sequence "?1049h"))
+
+(defun disable-alternative-screen (stream)
   (format/ansi-sequence "?1049l"))
 
-(defun format/position+color (stream x y fg bg)
-  (when (and (>= x 0) (>= y 0) (>= fg 0) (< fg 256) (>= bg 0) (< bg 256))
-    (format/ansi-sequence stream "~A;~AH" (1+ y) (1+ x))
+(defun clear-screen (stream)
+  (format/ansi-sequence "2J"))
+
+(defun go-to (stream x y)
+  (when (and (>= x 0) (>= y 0))
+    (format/ansi-sequence stream "~A;~AH" (1+ y) (1+ x))))
+
+(defun set-color (stream fg bg)
+  (when (and (>= fg 0) (< fg 256) (>= bg 0) (< bg 256)) 
     (format/ansi-sequence stream "38;5;~Am" fg)
     (format/ansi-sequence stream "48;5;~Am" bg)))
 
-(defun format/position+color+character (stream x y fg bg chr)
-  (format/position+color stream x y fg bg)
+(defun put-character (stream x y fg bg chr)
+  (go-to stream x y)
+  (set-color stream fg bg)
   (format stream "~C" chr))
 

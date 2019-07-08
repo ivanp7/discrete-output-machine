@@ -238,12 +238,12 @@
                 (lambda (pos)
                   (alexandria:if-let ((cell (occupant-find-top 
                                               pos-table pos cell-priority-fn)))
-                    (format/position+color+character 
+                    (put-character 
                       stream (+ displ-x (pos-x pos)) (+ displ-y (pos-y pos)) 
                       (cell-fg cell) (cell-bg cell) (cell-chr cell))
                     (multiple-value-bind (chr fg bg) 
                         (multiple-value-call blank-fn (pos-x pos) (pos-y pos))
-                      (format/position+color+character 
+                      (put-character
                         stream (+ displ-x (pos-x pos)) (+ displ-y (pos-y pos)) 
                         fg bg chr)))
                   (remhash pos pos-redraw-table))

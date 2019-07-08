@@ -5,8 +5,9 @@
 (defpackage #:discrete-output-machine
   (:use #:cl)
   (:nicknames #:dom)
-  (:export :format/ansi-sequence :format/initialize :format/finalize
-           :format/position+color :format/position+color+character
+  (:export :format/ansi-sequence :hide-cursor :show-cursor
+           :enable-alternative-screen :disable-alternative-screen
+           :clear-screen :go-to :set-color :put-character
            :define-lambda-object
            :*default-cell-x* :*default-cell-y* 
            :*default-cell-chr* :*default-cell-fg* :*default-cell-bg* 
