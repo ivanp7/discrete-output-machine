@@ -34,7 +34,7 @@
                                        (setf ,(alexandria:symbolicate getter)
                                              value))))
                                  setters)
-                             (:self (setf self value))))))))
+                             (:self (unless self (setf self value)))))))))
                (funcall obj :self obj)
                ,post-form
                obj))))
