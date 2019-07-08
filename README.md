@@ -116,7 +116,7 @@ steps must be made:
 
 1. Unregister cell from an old buffer:
 
-`(setf (cell-buffer cell) nil)
+`(setf (cell-buffer cell) nil)`
 
 2. Wait until an old cell parent buffer is redrawn (or redraw manually):
 
