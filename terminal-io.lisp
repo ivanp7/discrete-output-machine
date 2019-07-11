@@ -8,19 +8,19 @@
   `(format ,stream ,(format nil "~C[~A" #\Escape control-string) ,@args))
 
 (defun hide-cursor (stream)
-  (format/ansi-sequence "?25l"))
+  (format/ansi-sequence stream "?25l"))
 
 (defun show-cursor (stream)
-  (format/ansi-sequence "?25h"))
+  (format/ansi-sequence stream "?25h"))
 
 (defun enable-alternative-screen (stream)
-  (format/ansi-sequence "?1049h"))
+  (format/ansi-sequence stream "?1049h"))
 
 (defun disable-alternative-screen (stream)
-  (format/ansi-sequence "?1049l"))
+  (format/ansi-sequence stream "?1049l"))
 
 (defun clear-screen (stream)
-  (format/ansi-sequence "2J"))
+  (format/ansi-sequence stream "2J"))
 
 (defun go-to (stream x y)
   (when (and (>= x 0) (>= y 0))

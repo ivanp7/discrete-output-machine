@@ -6,7 +6,7 @@
 
 (defmacro define-lambda-object (type &key parameters bindings
                                      init-form getters setters post-form)
-  (alexandria:with-gensyms (self-key lock)
+  (let ((lock (gensym)) (self-key (alexandria:make-keyword (gensym))))
     `(progn
        (defun ,(alexandria:symbolicate "MAKE-" type) (,@parameters)
          (let ((,lock (bt:make-lock)) self)
@@ -31,7 +31,7 @@
                                    (if (listp setter)
                                      setter
                                      `(,setter 
-                                       (setf ,(alexandria:symbolicate getter)
+                                       (setf ,(alexandria:symbolicate setter)
                                              value))))
                                  setters)
                              (,self-key (setf self value))))))))
@@ -40,14 +40,16 @@
                obj))))
        ,@(mapcar 
            (lambda (getter) 
-             `(defmacro ,(alexandria:symbolicate type "-" (car getter)) (,type)
-                `(funcall ,,`,type ,,(car getter))))
+             (let ((getter (if (listp getter) (car getter) getter)))
+               `(defmacro ,(alexandria:symbolicate type "-" getter) (,type)
+                  `(funcall ,,`,type ,,getter))))
            getters)
        ,@(mapcar 
            (lambda (setter) 
-             `(defsetf ,(alexandria:symbolicate type "-" (car getter)) (,type) 
-                       (new-value)
-                `(funcall ,,`,type ,,(car getter) ,new-value)))
+             (let ((setter (if (listp setter) (car setter) setter)))
+               `(defsetf ,(alexandria:symbolicate type "-" setter) (,type) 
+                         (new-value)
+                  `(funcall ,,`,type ,,setter ,new-value))))
            setters))))
 
 ;;;----------------------------------------------------------------------------
@@ -237,7 +239,8 @@
               (alexandria:maphash-keys 
                 (lambda (pos)
                   (alexandria:if-let ((cell (occupant-find-top 
-                                              pos-table pos cell-priority-fn)))
+                                              pos-occ-table pos 
+                                              cell-priority-fn)))
                     (put-character 
                       stream (+ displ-x (pos-x pos)) (+ displ-y (pos-y pos)) 
                       (cell-fg cell) (cell-bg cell) (cell-chr cell))
