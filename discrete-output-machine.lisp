@@ -42,16 +42,17 @@
                ,obj))))
        ,@(mapcar 
            (lambda (getter) 
-             (let ((getter (if (listp getter) (car getter) getter)))
-               `(defmacro ,(alexandria:symbolicate type "-" getter) (,type)
-                  `(funcall ,,`,type ,,getter))))
+             (let* ((getter (if (listp getter) (car getter) getter))
+                    (name (alexandria:symbolicate type "-" getter)))
+               `(defmacro ,name (,type &rest args)
+                  `(funcall ,,`,type ,,getter ,@args))))
            getters)
        ,@(mapcar 
            (lambda (setter) 
-             (let ((setter (if (listp setter) (car setter) setter)))
-               `(defsetf ,(alexandria:symbolicate type "-" setter) (,type) 
-                         (new-value)
-                  `(funcall ,,`,type ,,setter ,new-value))))
+             (let* ((setter (if (listp setter) (car setter) setter))
+                    (name (alexandria:symbolicate type "-" setter)))
+               `(defsetf ,name (,type &rest args) (new-value)
+                  `(funcall ,,`,type ,,setter ,new-value ,@args))))
            setters))))
 
 ;;;----------------------------------------------------------------------------
