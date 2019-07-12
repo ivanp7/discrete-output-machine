@@ -6,18 +6,18 @@
 
 (defmacro define-lambda-object (type &key parameters bindings
                                      init-form getters setters post-form)
-  (let ((lock (gensym)) (self-key (alexandria:make-keyword (gensym))))
+  (alexandria:with-gensyms (lock obj key value-supplied-p self-key)
     `(progn
        (defun ,(alexandria:symbolicate "MAKE-" type) (,@parameters)
          (let ((,lock (bt:make-lock)) self)
            (declare (ignorable self))
            (let (,@bindings)
              ,init-form
-             (let ((obj 
-                     (lambda (key &optional (value nil value-supplied-p))
+             (let ((,obj 
+                     (lambda (,key &optional (value nil ,value-supplied-p))
                        (bt:with-lock-held (,lock)
-                         (if (not value-supplied-p)
-                           (ecase key
+                         (if (not ,value-supplied-p)
+                           (ecase ,key
                              ,@(mapcar
                                  (lambda (getter)
                                    (if (listp getter)
@@ -25,7 +25,7 @@
                                      `(,getter 
                                        ,(alexandria:symbolicate getter))))
                                  getters))
-                           (ecase key
+                           (ecase ,key
                              ,@(mapcar
                                  (lambda (setter)
                                    (if (listp setter)
@@ -35,9 +35,9 @@
                                              value))))
                                  setters)
                              (,self-key (setf self value))))))))
-               (funcall obj ,self-key obj)
+               (funcall ,obj ',self-key ,obj)
                ,post-form
-               obj))))
+               ,obj))))
        ,@(mapcar 
            (lambda (getter) 
              (let ((getter (if (listp getter) (car getter) getter)))
@@ -54,7 +54,7 @@
 
 ;;;----------------------------------------------------------------------------
 
-(defparameter *default-cell-metadata* ())
+(defparameter *default-cell-data* ())
 (defparameter *default-cell-x* 0)
 (defparameter *default-cell-y* 0)
 (defparameter *default-cell-chr* #\?)
@@ -64,17 +64,17 @@
 (defparameter *default-cell-buffer* nil)
 
 (define-lambda-object cell
-  :parameters (id &key (metadata *default-cell-metadata*) 
+  :parameters (id &key (data *default-cell-data*) 
                   (x *default-cell-x*) (y *default-cell-y*) 
                   (chr *default-cell-chr*)
                   (fg *default-cell-fg*) (bg *default-cell-bg*) 
                   (visibility *default-cell-visibility*) 
                   (buffer *default-cell-buffer*))
-  :bindings (metadata-changed-p (new-x x) (new-y y) (new-chr chr) 
+  :bindings (data-changed-p (new-x x) (new-y y) (new-chr chr) 
              (new-fg fg) (new-bg bg) (new-visibility visibility) 
              (new-buffer buffer))
   :init-form (setf buffer nil)
-  :getters (:id :metadata :x :y :chr :fg :bg :visibility :buffer
+  :getters (:id :data :x :y :chr :fg :bg :visibility :buffer
             (:needs-unregistration-p
               (and buffer (null new-buffer)))
             (:needs-registration-p
@@ -87,16 +87,16 @@
               (and new-buffer new-visibility 
                    (or (not visibility) (null buffer) 
                        (/= new-x x) (/= new-y y) (char/= new-chr chr) 
-                       (/= new-fg fg) (/= new-bg bg) metadata-changed-p)))
+                       (/= new-fg fg) (/= new-bg bg) data-changed-p)))
             (:moved-p
               (and buffer new-buffer (or (/= new-x x) (/= new-y y))))
             (:update
-              (setf metadata-changed-p nil x new-x y new-y 
+              (setf data-changed-p nil x new-x y new-y 
                     chr new-chr fg new-fg bg new-bg visibility new-visibility
                     buffer new-buffer)))
-  :setters ((:metadata 
-              (setf metadata-changed-p t
-                    metadata value))
+  :setters ((:data 
+              (setf data-changed-p t
+                    data value))
             (:x
               (when (>= value 0)
                 (setf new-x (if (and visibility buffer) 
@@ -145,6 +145,8 @@
 
 (defmacro pos-y (pos)
   `(cdr ,pos))
+
+;;;----------------------------------------------------------------------------
 
 (defun occupant-find-top (table pos priority-fn)
   (reduce (lambda (&optional c1 c2)

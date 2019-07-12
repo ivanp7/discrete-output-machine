@@ -9,10 +9,10 @@
            :enable-alternative-screen :disable-alternative-screen
            :clear-screen :go-to :set-color :put-character
            :define-lambda-object
-           :*default-cell-x* :*default-cell-y* 
+           :*default-cell-data* :*default-cell-x* :*default-cell-y* 
            :*default-cell-chr* :*default-cell-fg* :*default-cell-bg* 
            :*default-cell-visibility* :*default-cell-buffer*
-           :make-cell :cell-id :cell-metadata 
+           :make-cell :cell-id :cell-data 
            :cell-x :cell-y :cell-chr :cell-fg :cell-bg 
            :cell-visibility :cell-buffer
            :*default-buffer-stream* :*default-buffer-cell-priority-fn* 
