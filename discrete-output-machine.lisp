@@ -14,7 +14,9 @@
            (let (,@bindings)
              ,init-form
              (let ((,obj 
-                     (lambda (,key &optional (value nil ,value-supplied-p))
+                     (lambda (,key &optional (value nil ,value-supplied-p)
+                                   &rest args)
+                       (declare (ignorable value args))
                        (bt:with-lock-held (,lock)
                          (if (not ,value-supplied-p)
                            (ecase ,key
