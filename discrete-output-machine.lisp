@@ -4,9 +4,67 @@
 
 (in-package #:discrete-output-machine)
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun construct-accessor-case (spec default-body-fn)
+    (if (listp spec)
+      `(,(alexandria:make-keyword (car spec))
+        (destructuring-bind (,@(cadr spec)) args
+          ,@(cddr spec)))
+      `(,(alexandria:make-keyword spec)
+        ,(funcall default-body-fn spec))))
+
+  (defun get-accessor-macro-elements (spec type)
+    (let ((params (when (listp spec) (cadr spec))))
+      (multiple-value-bind (required optional rest keys)
+          (alexandria:parse-ordinary-lambda-list params)
+        (let* ((case-key (alexandria:make-keyword 
+                      (if (listp spec) (car spec) spec)))
+               (name (alexandria:symbolicate type "-" case-key))
+               (vars (append required (mapcar #'car optional)
+                             (remove nil (mapcar #'caddr optional))
+                             (when rest `(,rest)) (mapcar #'cadar keys)
+                             (remove nil (mapcar #'caddr keys))))
+               (blk (gensym)) (req-args (gensym)) (rest-args (gensym)))
+          (values name params case-key vars
+                  (when params
+                    `(let ((,req-args (list ,@required)) ,rest-args)
+                       (block ,blk
+                         (loop :for opt-value :in 
+                               `(,,@(mapcar #'car optional))
+                               :for opt-present :in
+                               `(,,@(mapcar #'caddr optional))
+                               :for opt-presence-var-used :in
+                               `(,,@(mapcar (lambda (s) 
+                                              (not (null (caddr s))))
+                                            optional))
+                               :do
+                               (if (and opt-presence-var-used 
+                                        (not opt-present))
+                                 (return-from ,blk)
+                                 (push opt-value ,rest-args)))
+                              ,(if rest
+                                 `(setf ,rest-args (nconc (nreverse ,rest) 
+                                                          ,rest-args))
+                                 `(loop :for key :in
+                                        `(,,@(mapcar #'caar keys))
+                                        :for key-value :in
+                                        `(,,@(mapcar #'cadar keys))
+                                        :for key-present :in
+                                        `(,,@(mapcar #'caddr keys))
+                                        :for key-presence-var-used :in
+                                        `(,,@(mapcar (lambda (s)
+                                                       (not (null (caddr s))))
+                                                     keys))
+                                        :do
+                                        (unless (and key-presence-var-used
+                                                     (not key-present))
+                                          (push key-value ,rest-args)
+                                          (push key ,rest-args)))))
+                       (nconc ,req-args (nreverse ,rest-args))))))))))
+
 (defmacro define-lambda-object (type &key parameters bindings
                                      init-form getters setters post-form)
-  (alexandria:with-gensyms (lock obj key value-supplied-p self-key)
+  (alexandria:with-gensyms (lock obj key no-value self-key)
     `(progn
        (defun ,(alexandria:symbolicate "MAKE-" type) (,@parameters)
          (let ((,lock (bt:make-lock)) self)
@@ -14,46 +72,43 @@
            (let (,@bindings)
              ,init-form
              (let ((,obj 
-                     (lambda (,key &optional (value nil ,value-supplied-p)
+                     (lambda (,key &optional (value ',no-value)
                                    &rest args)
                        (declare (ignorable value args))
                        (bt:with-lock-held (,lock)
-                         (if (not ,value-supplied-p)
+                         (if (eq value ',no-value)
                            (ecase ,key
                              ,@(mapcar
-                                 (lambda (getter)
-                                   (if (listp getter)
-                                     getter
-                                     `(,getter 
-                                       ,(alexandria:symbolicate getter))))
+                                 (lambda (spec)
+                                   (construct-accessor-case 
+                                     spec (lambda (var) `,var)))
                                  getters))
                            (ecase ,key
                              ,@(mapcar
-                                 (lambda (setter)
-                                   (if (listp setter)
-                                     setter
-                                     `(,setter 
-                                       (setf ,(alexandria:symbolicate setter)
-                                             value))))
+                                 (lambda (spec)
+                                   (construct-accessor-case
+                                     spec (lambda (var) `(setf ,var value))))
                                  setters)
                              (,self-key (setf self value))))))))
                (funcall ,obj ',self-key ,obj)
                ,post-form
                ,obj))))
-       ,@(mapcar 
-           (lambda (getter) 
-             (let* ((getter (if (listp getter) (car getter) getter))
-                    (name (alexandria:symbolicate type "-" getter)))
-               `(defmacro ,name (,type &rest args)
-                  `(funcall ,,`,type ,,getter ,@args))))
-           getters)
-       ,@(mapcar 
-           (lambda (setter) 
-             (let* ((setter (if (listp setter) (car setter) setter))
-                    (name (alexandria:symbolicate type "-" setter)))
-               `(defsetf ,name (,type &rest args) (new-value)
-                  `(funcall ,,`,type ,,setter ,new-value ,@args))))
-           setters))))
+       ,@(mapcar (lambda (spec)
+                   (multiple-value-bind (name params key vars arg-code)
+                       (get-accessor-macro-elements spec type)
+                     `(defmacro ,name (,type ,@params)
+                        (declare (ignorable ,@vars))
+                        (let ((args ,arg-code))
+                          `(funcall ,,`,type ,,key ,,`'',no-value ,@args)))))
+                 getters)
+       ,@(mapcar (lambda (spec)
+                   (multiple-value-bind (name params key vars arg-code)
+                       (get-accessor-macro-elements spec type) 
+                     `(defsetf ,name (,type ,@params) (new-value)
+                        (declare (ignorable ,@vars))
+                        (let ((args ,arg-code))
+                          `(funcall ,,`,type ,,key ,new-value ,@args)))))
+                 setters))))
 
 ;;;----------------------------------------------------------------------------
 
@@ -77,52 +132,52 @@
              (new-fg fg) (new-bg bg) (new-visibility visibility) 
              (new-buffer buffer))
   :init-form (setf buffer nil)
-  :getters (:id :data :x :y :chr :fg :bg :visibility :buffer
-            (:needs-unregistration-p
+  :getters (id data x y chr fg bg visibility buffer
+            (needs-unregistration-p ()
               (and buffer (null new-buffer)))
-            (:needs-registration-p
+            (needs-registration-p ()
               (and new-buffer (null buffer)))
-            (:needs-clearing-p
+            (needs-clearing-p ()
               (and buffer visibility (or (not new-visibility)
                                          (null new-buffer)
                                          (/= new-x x) (/= new-y y))))
-            (:needs-drawing-p 
+            (needs-drawing-p ()
               (and new-buffer new-visibility 
                    (or (not visibility) (null buffer) 
                        (/= new-x x) (/= new-y y) (char/= new-chr chr) 
                        (/= new-fg fg) (/= new-bg bg) data-changed-p)))
-            (:moved-p
+            (moved-p ()
               (and buffer new-buffer (or (/= new-x x) (/= new-y y))))
-            (:update
+            (update ()
               (setf data-changed-p nil x new-x y new-y 
                     chr new-chr fg new-fg bg new-bg visibility new-visibility
                     buffer new-buffer)))
-  :setters ((:data 
+  :setters ((data ()
               (setf data-changed-p t
                     data value))
-            (:x
+            (x ()
               (when (>= value 0)
                 (setf new-x (if (and visibility buffer) 
                               value (setf x value)))))
-            (:y
+            (y ()
               (when (>= value 0)
                 (setf new-y (if (and visibility buffer) 
                               value (setf y value)))))
-            (:chr
+            (chr ()
               (setf new-chr (if (and visibility buffer) 
                               value (setf chr value))))
-            (:fg
+            (fg ()
               (when (and (>= value 0) (< value 256))
                 (setf new-fg (if (and visibility buffer) 
                                value (setf fg value)))))
-            (:bg
+            (bg ()
               (when (and (>= value 0) (< value 256))
                 (setf new-bg (if (and visibility buffer) 
                                value (setf bg value)))))
-            (:visibility 
+            (visibility ()
               (setf new-visibility (if buffer
                                      value (setf visibility value))))
-            (:buffer
+            (buffer ()
               (if value
                 (if (null buffer)
                   (progn
@@ -192,12 +247,12 @@
              full-redraw-p cell-priority-fn-changed-p blank-fn-changed-p 
              (new-displ-x displ-x) (new-displ-y displ-y) 
              (new-size-x size-x) (new-size-y))
-  :getters (:stream :cell-priority-fn :blank-fn :displ-x :displ-y 
-            :size-x :size-y
-            (:cells (alexandria:hash-table-values id-table))
-            (:refresh
+  :getters (stream cell-priority-fn blank-fn displ-x displ-y size-x size-y
+            (cells ()
+              (alexandria:hash-table-values id-table))
+            (refresh ()
               (setf full-redraw-p t))
-            (:redraw
+            (redraw ()
               (when (or full-redraw-p blank-fn-changed-p 
                         (/= new-displ-x displ-x) (/= new-displ-y displ-y) 
                         (/= new-size-x size-x) (/= new-size-y size-y))
@@ -258,26 +313,26 @@
                 pos-redraw-table)
               (force-output stream)
               t))
-  :setters ((:cell-priority-fn
+  :setters ((cell-priority-fn ()
               (setf cell-priority-fn-changed-p t
                     cell-priority-fn value))
-            (:blank-fn
+            (blank-fn ()
               (setf blank-fn-changed-p t
                     blank-fn value))
-            (:displ-x
+            (displ-x ()
               (when (>= value 0)
                 (setf new-displ-x value)))
-            (:displ-y
+            (displ-y ()
               (when (>= value 0)
                 (setf new-displ-y value)))
-            (:size-x
+            (size-x ()
               (when (>= value 0)
                 (setf new-size-x value)))
-            (:size-y
+            (size-y ()
               (when (>= value 0)
                 (setf new-size-y value)))
-            (:register-cell
+            (register-cell ()
               (setf (gethash (cell-id value) id-table) value))
-            (:unregister-cell
+            (unregister-cell ()
               (remhash (cell-id value) id-table))))
 
