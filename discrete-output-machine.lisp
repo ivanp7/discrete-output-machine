@@ -23,7 +23,7 @@
    :bindings (data-changed-p (new-x x) (new-y y) (new-chr chr) 
               (new-fg fg) (new-bg bg) (new-visibility visibility) 
               (new-buffer buffer))
-   :init-form (setf buffer nil)
+   :init-forms ((setf buffer nil))
    :getters (id data x y chr fg bg visibility buffer
              (needs-unregistration-p ()
                (and buffer (null new-buffer)))
@@ -82,8 +82,8 @@
                  (when new-buffer
                    (funcall new-buffer :unregister-cell es:self)
                    (setf new-buffer nil)))))
-   :post-form (when new-buffer
-                (funcall new-buffer :register-cell es:self))))
+   :post-forms ((when new-buffer
+                  (funcall new-buffer :register-cell es:self)))))
 
 ;;;----------------------------------------------------------------------------
 
