@@ -4,114 +4,6 @@
 
 (in-package #:discrete-output-machine)
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (defun construct-accessor-case (spec default-body-fn)
-    (if (listp spec)
-      `(,(alexandria:make-keyword (car spec))
-        (destructuring-bind (,@(cadr spec)) args
-          ,@(cddr spec)))
-      `(,(alexandria:make-keyword spec)
-        ,(funcall default-body-fn spec))))
-
-  (defun get-accessor-macro-elements (spec type)
-    (let ((params (when (listp spec) (cadr spec))))
-      (multiple-value-bind (required optional rest keys)
-          (alexandria:parse-ordinary-lambda-list params)
-        (let* ((case-key (alexandria:make-keyword 
-                      (if (listp spec) (car spec) spec)))
-               (name (alexandria:symbolicate type "-" case-key))
-               (vars (append required (mapcar #'car optional)
-                             (remove nil (mapcar #'caddr optional))
-                             (when rest `(,rest)) (mapcar #'cadar keys)
-                             (remove nil (mapcar #'caddr keys))))
-               (blk (gensym)) (req-args (gensym)) (rest-args (gensym)))
-          (values name params case-key vars
-                  (when params
-                    `(let ((,req-args (list ,@required)) ,rest-args)
-                       (block ,blk
-                         (loop :for opt-value :in 
-                               `(,,@(mapcar #'car optional))
-                               :for opt-present :in
-                               `(,,@(mapcar #'caddr optional))
-                               :for opt-presence-var-used :in
-                               `(,,@(mapcar (lambda (s) 
-                                              (not (null (caddr s))))
-                                            optional))
-                               :do
-                               (if (and opt-presence-var-used 
-                                        (not opt-present))
-                                 (return-from ,blk)
-                                 (push opt-value ,rest-args)))
-                              ,(if rest
-                                 `(setf ,rest-args (nconc (nreverse ,rest) 
-                                                          ,rest-args))
-                                 `(loop :for key :in
-                                        `(,,@(mapcar #'caar keys))
-                                        :for key-value :in
-                                        `(,,@(mapcar #'cadar keys))
-                                        :for key-present :in
-                                        `(,,@(mapcar #'caddr keys))
-                                        :for key-presence-var-used :in
-                                        `(,,@(mapcar (lambda (s)
-                                                       (not (null (caddr s))))
-                                                     keys))
-                                        :do
-                                        (unless (and key-presence-var-used
-                                                     (not key-present))
-                                          (push key-value ,rest-args)
-                                          (push key ,rest-args)))))
-                       (nconc ,req-args (nreverse ,rest-args))))))))))
-
-(defmacro define-lambda-object (type &key parameters bindings
-                                     init-form getters setters post-form)
-  (alexandria:with-gensyms (lock obj key no-value self-key)
-    `(progn
-       (defun ,(alexandria:symbolicate "MAKE-" type) (,@parameters)
-         (let ((,lock (bt:make-lock)) self)
-           (declare (ignorable self))
-           (let (,@bindings)
-             ,init-form
-             (let ((,obj 
-                     (lambda (,key &optional (value ',no-value)
-                                   &rest args)
-                       (declare (ignorable value args))
-                       (bt:with-lock-held (,lock)
-                         (if (eq value ',no-value)
-                           (ecase ,key
-                             ,@(mapcar
-                                 (lambda (spec)
-                                   (construct-accessor-case 
-                                     spec (lambda (var) `,var)))
-                                 getters))
-                           (ecase ,key
-                             ,@(mapcar
-                                 (lambda (spec)
-                                   (construct-accessor-case
-                                     spec (lambda (var) `(setf ,var value))))
-                                 setters)
-                             (,self-key (setf self value))))))))
-               (funcall ,obj ',self-key ,obj)
-               ,post-form
-               ,obj))))
-       ,@(mapcar (lambda (spec)
-                   (multiple-value-bind (name params key vars arg-code)
-                       (get-accessor-macro-elements spec type)
-                     `(defmacro ,name (,type ,@params)
-                        (declare (ignorable ,@vars))
-                        (let ((args ,arg-code))
-                          `(funcall ,,`,type ,,key ,,`'',no-value ,@args)))))
-                 getters)
-       ,@(mapcar (lambda (spec)
-                   (multiple-value-bind (name params key vars arg-code)
-                       (get-accessor-macro-elements spec type) 
-                     `(defsetf ,name (,type ,@params) (new-value)
-                        (declare (ignorable ,@vars))
-                        (let ((args ,arg-code))
-                          `(funcall ,,`,type ,,key ,new-value ,@args)))))
-                 setters))))
-
-;;;----------------------------------------------------------------------------
-
 (defparameter *default-cell-data* ())
 (defparameter *default-cell-x* 0)
 (defparameter *default-cell-y* 0)
@@ -121,7 +13,7 @@
 (defparameter *default-cell-visibility* nil)
 (defparameter *default-cell-buffer* nil)
 
-(define-lambda-object cell
+(es:define-structure cell
   :parameters (id &key (data *default-cell-data*) 
                   (x *default-cell-x*) (y *default-cell-y*) 
                   (chr *default-cell-chr*)
@@ -154,44 +46,44 @@
                     buffer new-buffer)))
   :setters ((data ()
               (setf data-changed-p t
-                    data value))
+                    data es:value))
             (x ()
-              (when (>= value 0)
+              (when (>= es:value 0)
                 (setf new-x (if (and visibility buffer) 
-                              value (setf x value)))))
+                              es:value (setf x es:value)))))
             (y ()
-              (when (>= value 0)
+              (when (>= es:value 0)
                 (setf new-y (if (and visibility buffer) 
-                              value (setf y value)))))
+                              es:value (setf y es:value)))))
             (chr ()
               (setf new-chr (if (and visibility buffer) 
-                              value (setf chr value))))
+                              es:value (setf chr es:value))))
             (fg ()
-              (when (and (>= value 0) (< value 256))
+              (when (and (>= es:value 0) (< es:value 256))
                 (setf new-fg (if (and visibility buffer) 
-                               value (setf fg value)))))
+                               es:value (setf fg es:value)))))
             (bg ()
-              (when (and (>= value 0) (< value 256))
+              (when (and (>= es:value 0) (< es:value 256))
                 (setf new-bg (if (and visibility buffer) 
-                               value (setf bg value)))))
+                               es:value (setf bg es:value)))))
             (visibility ()
               (setf new-visibility (if buffer
-                                     value (setf visibility value))))
+                                     es:value (setf visibility es:value))))
             (buffer ()
-              (if value
+              (if es:value
                 (if (null buffer)
                   (progn
-                    (when (and new-buffer (not (eq new-buffer value)))
-                      (funcall new-buffer :unregister-cell self))
-                    (unless (eq value new-buffer)
-                      (funcall value :register-cell self))
-                    (setf new-buffer value))
+                    (when (and new-buffer (not (eq new-buffer es:value)))
+                      (funcall new-buffer :unregister-cell es:self))
+                    (unless (eq es:value new-buffer)
+                      (funcall es:value :register-cell es:self))
+                    (setf new-buffer es:value))
                   buffer)
                 (when new-buffer
-                  (funcall new-buffer :unregister-cell self)
+                  (funcall new-buffer :unregister-cell es:self)
                   (setf new-buffer nil)))))
   :post-form (when new-buffer
-               (funcall new-buffer :register-cell self)))
+               (funcall new-buffer :register-cell es:self)))
 
 ;;;----------------------------------------------------------------------------
 
@@ -232,7 +124,7 @@
 (defparameter *default-buffer-size-x* 80)
 (defparameter *default-buffer-size-y* 24)
 
-(define-lambda-object buffer
+(es:define-structure buffer
   :parameters (&key (stream *default-buffer-stream*)
                     (cell-priority-fn *default-buffer-priority-fn*)
                     (blank-fn *default-buffer-blank-fn*)
@@ -315,24 +207,24 @@
               t))
   :setters ((cell-priority-fn ()
               (setf cell-priority-fn-changed-p t
-                    cell-priority-fn value))
+                    cell-priority-fn es:value))
             (blank-fn ()
               (setf blank-fn-changed-p t
-                    blank-fn value))
+                    blank-fn es:value))
             (displ-x ()
-              (when (>= value 0)
-                (setf new-displ-x value)))
+              (when (>= es:value 0)
+                (setf new-displ-x es:value)))
             (displ-y ()
-              (when (>= value 0)
-                (setf new-displ-y value)))
+              (when (>= es:value 0)
+                (setf new-displ-y es:value)))
             (size-x ()
-              (when (>= value 0)
-                (setf new-size-x value)))
+              (when (>= es:value 0)
+                (setf new-size-x es:value)))
             (size-y ()
-              (when (>= value 0)
-                (setf new-size-y value)))
+              (when (>= es:value 0)
+                (setf new-size-y es:value)))
             (register-cell ()
-              (setf (gethash (cell-id value) id-table) value))
+              (setf (gethash (cell-id es:value) id-table) es:value))
             (unregister-cell ()
-              (remhash (cell-id value) id-table))))
+              (remhash (cell-id es:value) id-table))))
 

@@ -5,9 +5,9 @@
 (asdf:defsystem #:discrete-output-machine
   :description "Abstraction layer to make creation of terminal apps easy."
   :author "Ivan Podmazov"
-  :license  "GNU/GPLv2"
-  :version "0.0.1"
-  :depends-on (#:alexandria #:bordeaux-threads)
+  :license  "MIT"
+  :version "1.0.0"
+  :depends-on (#:alexandria #:cl-enhanced-structures)
   :serial t
   :components ((:file "package")
                (:file "terminal-io" :depends-on ("package"))

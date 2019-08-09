@@ -35,13 +35,6 @@ in 256 color palette.
 
 Move cursor, set foreground and background colors and write a single character.
 
-### Generic macros
-
-#### define-lambda-object (type *&key* parameters bindings init-form getters setters post-form)
-
-Define a simple non-CLOS object class using closure. 
-This includes `make-{type}` function and a set of getter and setter macros.
-
 ### Cell
 
 #### \*default-cell-x\*

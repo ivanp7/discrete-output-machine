@@ -8,7 +8,6 @@
   (:export :format/ansi-sequence :hide-cursor :show-cursor
            :enable-alternative-screen :disable-alternative-screen
            :clear-screen :go-to :set-color :put-character
-           :define-lambda-object
            :*default-cell-data* :*default-cell-x* :*default-cell-y* 
            :*default-cell-chr* :*default-cell-fg* :*default-cell-bg* 
            :*default-cell-visibility* :*default-cell-buffer*
