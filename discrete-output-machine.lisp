@@ -85,13 +85,13 @@
 
 ;;;----------------------------------------------------------------------------
 
-(defmacro make-pos (x y)
+(defmacro make-position (x y)
   `(cons ,x ,y))
 
-(defmacro pos-x (pos)
+(defmacro position-x (pos)
   `(car ,pos))
 
-(defmacro pos-y (pos)
+(defmacro position-y (pos)
   `(cdr ,pos))
 
 ;;;----------------------------------------------------------------------------
@@ -135,11 +135,11 @@
                      (screen-size-x *default-buffer-screen-size-x*)
                      (screen-size-y *default-buffer-screen-size-y*))
    :body-macros ((pos-on-screen-p (pos)
-                   `(and (>= (pos-x ,pos) displ-x)
-                         (>= (pos-y ,pos) displ-y)
-                         (< (pos-x ,pos) (+ displ-x screen-size-x))
-                         (< (pos-y ,pos) (+ displ-y screen-size-y)))))
-   :bindings ((pos-old (make-pos 0 0)) (pos (make-pos 0 0)) 
+                   `(and (>= (position-x ,pos) displ-x)
+                         (>= (position-y ,pos) displ-y)
+                         (< (position-x ,pos) (+ displ-x screen-size-x))
+                         (< (position-y ,pos) (+ displ-y screen-size-y)))))
+   :bindings ((pos-old (make-position 0 0)) (pos (make-position 0 0)) 
               (id-table (make-hash-table :test 'equal)) 
               (pos-occ-table (make-hash-table :test 'equal)) 
               (pos-redraw-table (make-hash-table :test 'equal)) 
@@ -172,11 +172,11 @@
                  (loop :for y 
                        :from displ-y :below (+ displ-y screen-size-y)
                        :do
-                       (setf (pos-y pos) y)
+                       (setf (position-y pos) y)
                        (loop :for x 
                              :from displ-x :below (+ displ-x screen-size-x)
                              :do
-                             (setf (pos-x pos) x 
+                             (setf (position-x pos) x 
                                    (gethash pos pos-redraw-table) t))))
                (maphash 
                  (lambda (id cell)
@@ -187,11 +187,11 @@
                          (needs-clearing-p (cell-needs-clearing-p cell))
                          (needs-drawing-p (cell-needs-drawing-p cell))
                          (moved-p (cell-moved-p cell)))
-                     (setf (pos-x pos-old) (cell-x cell) 
-                           (pos-y pos-old) (cell-y cell))
+                     (setf (position-x pos-old) (cell-x cell) 
+                           (position-y pos-old) (cell-y cell))
                      (cell-update cell)
-                     (setf (pos-x pos) (cell-x cell) 
-                           (pos-y pos) (cell-y cell))
+                     (setf (position-x pos) (cell-x cell) 
+                           (position-y pos) (cell-y cell))
                      (when needs-unregistration-p
                        (remhash id id-table)
                        #1=(alexandria:deletef (gethash pos-old pos-occ-table)
@@ -215,15 +215,16 @@
                                                cell-priority-fn)))
                      (put-character 
                        stream 
-                       (+ screen-displ-x (- (pos-x pos) displ-x)) 
-                       (+ screen-displ-y (- (pos-y pos) displ-y)) 
+                       (+ screen-displ-x (- (position-x pos) displ-x)) 
+                       (+ screen-displ-y (- (position-y pos) displ-y)) 
                        (cell-fg cell) (cell-bg cell) (cell-chr cell))
                      (multiple-value-bind (chr fg bg) 
-                         (multiple-value-call blank-fn (pos-x pos) (pos-y pos))
+                         (multiple-value-call blank-fn 
+                           (position-x pos) (position-y pos))
                        (put-character
                          stream 
-                         (+ screen-displ-x (- (pos-x pos) displ-x)) 
-                         (+ screen-displ-y (- (pos-y pos) displ-y)) 
+                         (+ screen-displ-x (- (position-x pos) displ-x)) 
+                         (+ screen-displ-y (- (position-y pos) displ-y)) 
                          fg bg chr)))
                    (remhash pos pos-redraw-table))
                  pos-redraw-table)

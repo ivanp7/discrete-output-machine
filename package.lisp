@@ -14,6 +14,7 @@
            :make-cell :cell-id :cell-data 
            :cell-x :cell-y :cell-chr :cell-fg :cell-bg 
            :cell-visibility :cell-buffer
+           :make-position :position-x :position-y
            :*default-buffer-stream* :*default-buffer-cell-priority-fn* 
            :*default-buffer-blank-fn* 
            :*default-buffer-displ-x* :*default-buffer-displ-y*
