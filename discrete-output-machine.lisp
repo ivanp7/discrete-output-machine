@@ -48,13 +48,11 @@
                (setf data-changed-p t
                      data es:value))
              (x ()
-               (when (>= es:value 0)
-                 (setf new-x (if (and visibility buffer) 
-                               es:value (setf x es:value)))))
+               (setf new-x (if (and visibility buffer) 
+                             es:value (setf x es:value))))
              (y ()
-               (when (>= es:value 0)
-                 (setf new-y (if (and visibility buffer) 
-                               es:value (setf y es:value)))))
+               (setf new-y (if (and visibility buffer) 
+                             es:value (setf y es:value))))
              (chr ()
                (setf new-chr (if (and visibility buffer) 
                                es:value (setf chr es:value))))
@@ -121,8 +119,10 @@
     (values #\Space 7 0))) ; (values chr fg bg)
 (defparameter *default-buffer-displ-x* 0)
 (defparameter *default-buffer-displ-y* 0)
-(defparameter *default-buffer-size-x* 80)
-(defparameter *default-buffer-size-y* 24)
+(defparameter *default-buffer-screen-displ-x* 0)
+(defparameter *default-buffer-screen-displ-y* 0)
+(defparameter *default-buffer-screen-size-x* 80)
+(defparameter *default-buffer-screen-size-y* 24)
 
 (es:define-structure buffer
   (:parameters (&key (stream *default-buffer-stream*)
@@ -130,32 +130,54 @@
                      (blank-fn *default-buffer-blank-fn*)
                      (displ-x *default-buffer-displ-x*)
                      (displ-y *default-buffer-displ-y*)
-                     (size-x *default-buffer-size-x*)
-                     (size-y *default-buffer-size-y*))
+                     (screen-displ-x *default-buffer-screen-displ-x*)
+                     (screen-displ-y *default-buffer-screen-displ-y*)
+                     (screen-size-x *default-buffer-screen-size-x*)
+                     (screen-size-y *default-buffer-screen-size-y*))
+   :body-macros ((pos-on-screen-p (pos)
+                   `(and (>= (pos-x ,pos) displ-x)
+                         (>= (pos-y ,pos) displ-y)
+                         (< (pos-x ,pos) (+ displ-x screen-size-x))
+                         (< (pos-y ,pos) (+ displ-y screen-size-y)))))
    :bindings ((pos-old (make-pos 0 0)) (pos (make-pos 0 0)) 
               (id-table (make-hash-table :test 'equal)) 
               (pos-occ-table (make-hash-table :test 'equal)) 
               (pos-redraw-table (make-hash-table :test 'equal)) 
               full-redraw-p cell-priority-fn-changed-p blank-fn-changed-p 
-              (new-displ-x displ-x) (new-displ-y displ-y) 
-              (new-size-x size-x) (new-size-y))
-   :getters (stream cell-priority-fn blank-fn displ-x displ-y size-x size-y
+              (new-displ-x displ-x) 
+              (new-displ-y displ-y) 
+              (new-screen-displ-x screen-displ-x) 
+              (new-screen-displ-y screen-displ-y) 
+              (new-screen-size-x screen-size-x) (new-screen-size-y))
+   :getters (stream cell-priority-fn blank-fn displ-x displ-y
+             screen-displ-x screen-displ-y screen-size-x screen-size-y
              (cells ()
                (alexandria:hash-table-values id-table))
              (refresh ()
                (setf full-redraw-p t))
              (redraw ()
                (when (or full-redraw-p blank-fn-changed-p 
-                         (/= new-displ-x displ-x) (/= new-displ-y displ-y) 
-                         (/= new-size-x size-x) (/= new-size-y size-y))
+                         (/= new-displ-x displ-x)
+                         (/= new-displ-y displ-y)
+                         (/= new-screen-displ-x screen-displ-x) 
+                         (/= new-screen-displ-y screen-displ-y) 
+                         (/= new-screen-size-x screen-size-x) 
+                         (/= new-screen-size-y screen-size-y))
                  (setf full-redraw-p nil blank-fn-changed-p nil
                        displ-x new-displ-x displ-y new-displ-y
-                       size-x new-size-x size-y new-size-y)
-                 (dotimes (y size-y)
-                   (setf (pos-y pos) y)
-                   (dotimes (x size-x)
-                     (setf (pos-x pos) x 
-                           (gethash pos pos-redraw-table) t))))
+                       screen-displ-x new-screen-displ-x 
+                       screen-displ-y new-screen-displ-y
+                       screen-size-x new-screen-size-x 
+                       screen-size-y new-screen-size-y)
+                 (loop :for y 
+                       :from displ-y :below (+ displ-y screen-size-y)
+                       :do
+                       (setf (pos-y pos) y)
+                       (loop :for x 
+                             :from displ-x :below (+ displ-x screen-size-x)
+                             :do
+                             (setf (pos-x pos) x 
+                                   (gethash pos pos-redraw-table) t))))
                (maphash 
                  (lambda (id cell)
                    (let ((needs-unregistration-p 
@@ -177,12 +199,10 @@
                      (when needs-registration-p
                        #2=(push cell (gethash pos pos-occ-table)))
                      (when needs-clearing-p
-                       (when (and (< (pos-x pos-old) size-x)
-                                  (< (pos-y pos-old) size-y))
+                       (when (pos-on-screen-p pos-old)
                          (setf (gethash pos-old pos-redraw-table) t)))
                      (when needs-drawing-p
-                       (when (and (< (pos-x pos) size-x)
-                                  (< (pos-y pos) size-y))
+                       (when (pos-on-screen-p pos)
                          (setf (gethash pos pos-redraw-table) t)))
                      (when moved-p
                        #1#
@@ -194,12 +214,16 @@
                                                pos-occ-table pos 
                                                cell-priority-fn)))
                      (put-character 
-                       stream (+ displ-x (pos-x pos)) (+ displ-y (pos-y pos)) 
+                       stream 
+                       (+ screen-displ-x (- (pos-x pos) displ-x)) 
+                       (+ screen-displ-y (- (pos-y pos) displ-y)) 
                        (cell-fg cell) (cell-bg cell) (cell-chr cell))
                      (multiple-value-bind (chr fg bg) 
                          (multiple-value-call blank-fn (pos-x pos) (pos-y pos))
                        (put-character
-                         stream (+ displ-x (pos-x pos)) (+ displ-y (pos-y pos)) 
+                         stream 
+                         (+ screen-displ-x (- (pos-x pos) displ-x)) 
+                         (+ screen-displ-y (- (pos-y pos) displ-y)) 
                          fg bg chr)))
                    (remhash pos pos-redraw-table))
                  pos-redraw-table)
@@ -212,17 +236,21 @@
                (setf blank-fn-changed-p t
                      blank-fn es:value))
              (displ-x ()
-               (when (>= es:value 0)
-                 (setf new-displ-x es:value)))
+               (setf new-displ-x es:value))
              (displ-y ()
+               (setf new-displ-y es:value))
+             (screen-displ-x ()
                (when (>= es:value 0)
-                 (setf new-displ-y es:value)))
-             (size-x ()
+                 (setf new-screen-displ-x es:value)))
+             (screen-displ-y ()
                (when (>= es:value 0)
-                 (setf new-size-x es:value)))
-             (size-y ()
+                 (setf new-screen-displ-y es:value)))
+             (screen-size-x ()
                (when (>= es:value 0)
-                 (setf new-size-y es:value)))
+                 (setf new-screen-size-x es:value)))
+             (screen-size-y ()
+               (when (>= es:value 0)
+                 (setf new-screen-size-y es:value)))
              (register-cell ()
                (setf (gethash (cell-id es:value) id-table) es:value))
              (unregister-cell ()
