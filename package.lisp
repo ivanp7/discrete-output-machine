@@ -14,6 +14,7 @@
            :make-cell :cell-id :cell-data 
            :cell-x :cell-y :cell-chr :cell-fg :cell-bg 
            :cell-visibility :cell-buffer
+           :cell-acquire-lock :cell-release-lock :with-cell-lock-held
            :make-position :position-x :position-y
            :*default-buffer-stream* :*default-buffer-cell-priority-fn* 
            :*default-buffer-blank-fn* 
@@ -24,5 +25,6 @@
            :buffer-blank-fn :buffer-displ-x :buffer-displ-y 
            :buffer-screen-displ-x :buffer-screen-displ-y 
            :buffer-screen-size-x :buffer-screen-size-y 
-           :buffer-cells :buffer-refresh :buffer-redraw))
+           :buffer-cells :buffer-refresh :buffer-redraw
+           :buffer-acquire-lock :buffer-release-lock :with-buffer-lock-held))
 
