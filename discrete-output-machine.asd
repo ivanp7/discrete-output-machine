@@ -11,5 +11,7 @@
   :serial t
   :components ((:file "package")
                (:file "terminal-io" :depends-on ("package"))
-               (:file "discrete-output-machine" :depends-on ("terminal-io"))))
+               (:file "cell" :depends-on ("terminal-io"))
+               (:file "multicell" :depends-on ("cell"))
+               (:file "buffer" :depends-on ("cell"))))
 

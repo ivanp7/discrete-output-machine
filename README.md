@@ -73,9 +73,9 @@ Create a cell with `id` and the specified properties.
 
 Cell ID value.
 
-#### *SETFABLE* cell-metadata (cell)
+#### *SETFABLE* cell-data (cell)
 
-Cell metadata.
+Cell data.
 
 #### *SETFABLE* cell-x (cell)
 
@@ -118,6 +118,118 @@ steps must be made:
 3. Register cell to a new buffer:
 
 `(setf (cell-buffer cell) new-buffer)`
+
+#### cell-acquire-lock (cell)
+
+Acquire cell's lock.
+
+#### cell-release-lock (cell)
+
+Release cell's lock.
+
+#### with-cell-lock-held ((cell) &body body)
+
+Execute code with cell's lock held.
+
+### Multicell (rectangular group of cells)
+
+#### \*default-multicell-data-fn\*
+
+Default child cell data generator function.
+
+#### \*default-multicell-size-x\*
+
+Default multicell width.
+
+#### \*default-multicell-size-y\*
+
+Default multicell height.
+
+#### \*default-multicell-x\*
+
+Default multicell top-left corner x coordinate.
+
+#### \*default-multicell-y\*
+
+Default multicell top-left corner y coordinate.
+
+#### \*default-multicell-visibility\*
+
+Default multicell visibility.
+
+#### make-multicell (id *&key* data-fn size-x size-y x y visibility buffer)
+
+Create a multicell with the specified properties.
+
+#### multicell-id (multicell)
+
+Multicell ID value.
+
+#### multicell-size-x (multicell)
+
+Multicell x size.
+
+#### multicell-size-y (multicell)
+
+Multicell y size.
+
+#### *SETFABLE* multicell-x (multicell)
+
+Multicell top-left x coordinate.
+
+#### *SETFABLE* multicell-y (multicell)
+
+Multicell top-left y coordinate.
+
+#### *SETFABLE* multicell-visibility (multicell)
+
+Multicell visibility.
+
+#### *SETFABLE* multicell-buffer (multicell)
+
+Multicell buffer.
+
+#### *SETFABLE* multicell-data (multicell x y)
+
+Multicell's child cell data.
+
+#### *SETFABLE* multicell-chr (multicell x y)
+
+Multicell's child cell character.
+
+#### *SETFABLE* multicell-fg (multicell x y)
+
+Multicell's child cell foreground color in 256 color palette.
+
+#### *SETFABLE* multicell-bg (multicell x y)
+
+Multicell's child cell background color in 256 color palette.
+
+#### multicell-acquire-lock (multicell)
+
+Acquire multicell's lock.
+
+#### multicell-release-lock (multicell)
+
+Release multicell's lock.
+
+#### with-multicell-lock-held ((multicell) &body body)
+
+Execute code with multicell's lock held.
+
+#### multicell-acquire-cells-locks (multicell)
+
+Acquire locks of all cells of a multicell.
+
+#### multicell-release-cells-locks (multicell)
+
+Release locks of all cells of a multicell.
+
+#### with-multicell-cells-locks-held ((multicell) &body body)
+
+Execute code with all multicell child cells' locks held.
+
+#### 
 
 ### Buffer
 
@@ -195,6 +307,18 @@ Request full area redraw at next `buffer-redraw`.
 #### buffer-redraw (buffer)
 
 Update and redraw any changed cells.
+
+#### buffer-acquire-lock (buffer)
+
+Acquire buffer's lock.
+
+#### buffer-release-lock (buffer)
+
+Release buffer's lock.
+
+#### with-buffer-lock-held ((buffer) &body body)
+
+Execute code with buffer's lock held.
 
 ## Author
 
