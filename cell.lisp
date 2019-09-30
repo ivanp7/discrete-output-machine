@@ -4,82 +4,205 @@
 
 (in-package #:discrete-output-machine)
 
-(defparameter *default-cell-data* ())
-(defparameter *default-cell-x* 0)
-(defparameter *default-cell-y* 0)
-(defparameter *default-cell-chr* #\?)
-(defparameter *default-cell-fg* 7)
-(defparameter *default-cell-bg* 1)
-(defparameter *default-cell-visibility* nil)
-(defparameter *default-cell-buffer* nil)
+;;; Coordinates
 
-(es:define-structure cell
-  :parameters (id &key (data *default-cell-data*) 
-                  (x *default-cell-x*) (y *default-cell-y*) 
-                  (chr *default-cell-chr*)
-                  (fg *default-cell-fg*) (bg *default-cell-bg*) 
-                  (visibility *default-cell-visibility*) 
-                  (buffer *default-cell-buffer*))
-  :bindings (data-changed-p (new-x x) (new-y y) (new-chr chr) 
-             (new-fg fg) (new-bg bg) (new-visibility visibility) 
-             (new-buffer buffer))
-  :init-forms ((setf buffer nil))
-  :getters (id data x y chr fg bg visibility buffer
-            (needs-unregistration-p ()
-              (and buffer (null new-buffer)))
-            (needs-registration-p ()
-              (and new-buffer (null buffer)))
-            (needs-clearing-p ()
-              (and buffer visibility (or (not new-visibility)
-                                         (null new-buffer)
-                                         (/= new-x x) (/= new-y y))))
-            (needs-drawing-p ()
-              (and new-buffer new-visibility 
-                   (or (not visibility) (null buffer) 
-                       (/= new-x x) (/= new-y y) (char/= new-chr chr) 
-                       (/= new-fg fg) (/= new-bg bg) data-changed-p)))
-            (moved-p ()
-              (and buffer new-buffer (or (/= new-x x) (/= new-y y))))
-            (update ()
-              (setf data-changed-p nil x new-x y new-y 
-                    chr new-chr fg new-fg bg new-bg visibility new-visibility
-                    buffer new-buffer)))
-  :setters ((data ()
-              (setf data-changed-p t
-                    data es:value))
-            (x ()
-              (setf new-x (if (and visibility buffer) 
-                            es:value (setf x es:value))))
-            (y ()
-              (setf new-y (if (and visibility buffer) 
-                            es:value (setf y es:value))))
-            (chr ()
-              (setf new-chr (if (and visibility buffer) 
-                              es:value (setf chr es:value))))
-            (fg ()
-              (when (and (>= es:value 0) (< es:value 256))
-                (setf new-fg (if (and visibility buffer) 
-                               es:value (setf fg es:value)))))
-            (bg ()
-              (when (and (>= es:value 0) (< es:value 256))
-                (setf new-bg (if (and visibility buffer) 
-                               es:value (setf bg es:value)))))
-            (visibility ()
-              (setf new-visibility (if buffer
-                                     es:value (setf visibility es:value))))
-            (buffer ()
-              (if es:value
-                (if (null buffer)
-                  (progn
-                    (when (and new-buffer (not (eq new-buffer es:value)))
-                      (funcall new-buffer :unregister-cell es:self))
-                    (unless (eq es:value new-buffer)
-                      (funcall es:value :register-cell es:self))
-                    (setf new-buffer es:value))
-                  buffer)
-                (when new-buffer
-                  (funcall new-buffer :unregister-cell es:self)
-                  (setf new-buffer nil)))))
-  :post-forms ((when new-buffer
-                 (funcall new-buffer :register-cell es:self))))
+(cl-se:define-synchronized-entity coord (x y &aux (old-x x) (old-y y) 
+                                                  (trigger-flag t) owners)
+    (:declarations ((type fixnum x y old-x old-y) 
+                    (type boolean trigger-flag) 
+                    (type list owners)))
+
+  x y
+  ((old-x () :reads (x))
+   old-x)
+  ((old-y () :reads (y))
+   old-y)
+
+  (((setf x) (value) :writes (x) :calls (trigger-owners))
+   (setf old-x x x value)
+   (when (/= x old-x) 
+     (trigger-owners))
+   x)
+  (((setf y) (value) :writes (y) :calls (trigger-owners))
+   (setf old-y y y value)
+   (when (/= y old-y) 
+     (trigger-owners))
+   y)
+
+  ((setv (x-value y-value) :writes (x y) :calls (trigger-owners))
+   (setf old-x x x x-value 
+         old-y y y y-value)
+   (when (or (/= x old-x) (/= y old-y))
+     (trigger-owners))
+   t)
+
+  (((setf trigger-flag) (value) :writes (trigger-flag))
+   (setf trigger-flag value))
+  ((trigger-owners () :reads (trigger-flag owners) :visibility :private)
+   (when trigger-flag
+     (dolist (owner owners)
+       ;; use funcall form because the accessor macro isn't defined yet
+       (funcall owner +no-value+ :trigger)))) 
+  ((push-owner (owner) :writes (owners))
+   (pushnew owner owners :test #'eq))
+  ((pop-owner (owner) :writes (owners))
+   (alexandria:deletef owners owner :test #'eq)))
+
+;;;----------------------------------------------------------------------------
+;;; Colored character
+
+(deftype color () '(integer 0 255))
+
+(defparameter *default-chr* #\█)
+(defparameter *default-fg* 7)
+(defparameter *default-bg* 0)
+(defparameter *default-visibility* t)
+
+(cl-se:define-synchronized-entity colchar 
+    (&optional (chr *default-chr*) (fg *default-fg*) (bg *default-bg*)
+               (visibility *default-visibility*) 
+     &aux (old-visibility visibility) (trigger-flag t) owners)
+    (:declarations
+      ((type character chr)
+       (type color fg bg)
+       (type boolean visibility old-visibility trigger-flag)
+       (type list owners)))
+
+  chr fg bg visibility
+  ((old-visibility () :reads (visibility))
+   old-visibility)
+
+  (((setf chr) (value) :writes (chr) :reads (visibility) 
+               :calls (trigger-owners))
+   (setf chr 
+         (prog1 value
+           (when (and visibility (char/= chr value)) 
+             (trigger-owners)))))
+  (((setf fg) (value) :writes (fg) :reads (visibility) 
+              :calls (trigger-owners))
+   (setf fg 
+         (prog1 value
+           (when (and visibility (/= fg value)) 
+             (trigger-owners)))))
+  (((setf bg) (value) :writes (bg) :reads (visibility) 
+              :calls (trigger-owners))
+   (setf bg 
+         (prog1 value
+           (when (and visibility (/= bg value)) 
+             (trigger-owners)))))
+  (((setf visibility) (value) :writes (visibility) :calls (trigger-owners))
+   (setf old-visibility visibility visibility value) 
+   (unless (eql visibility old-visibility) 
+     (trigger-owners))
+   visibility)
+
+  ((setv (chr-value fg-value bg-value) 
+         :writes (chr fg bg) :reads (visibility) :calls (trigger-owners))
+   (when (or (char/= chr chr-value) (/= fg fg-value) (/= bg bg-value))
+     (setf chr chr-value fg fg-value bg bg-value)
+     (when visibility
+       (trigger-owners)))
+   t)
+
+  (((setf trigger-flag) (value) :writes (trigger-flag))
+   (setf trigger-flag value))
+  ((trigger-owners () :reads (trigger-flag owners) :visibility :private)
+   (when trigger-flag
+     (dolist (owner owners)
+       ;; use funcall form because the accessor macro isn't defined yet
+       (funcall owner +no-value+ :trigger)))) 
+  ((push-owner (owner) :writes (owners))
+   (pushnew owner owners :test #'eq))
+  ((pop-owner (owner) :writes (owners))
+   (alexandria:deletef owners owner :test #'eq)))
+
+;;;----------------------------------------------------------------------------
+;;; Cell
+
+(defparameter *default-buffer* nil)
+
+(cl-se:define-synchronized-entity cell 
+    (coord &optional (colchar (make-colchar)) (buffer *default-buffer*))
+    (:declarations
+      ((type coord coord) (type colchar colchar)
+       (type (or null buffer) buffer))
+      :initialization
+      ((coord-push-owner coord self)
+       (colchar-push-owner colchar self)
+       (when buffer
+         (funcall buffer :push-cell +no-value+ self))))
+
+  coord colchar buffer
+  (((setf coord) (value) :writes (coord) :reads (buffer))
+   (coord-pop-owner coord self)
+   (prog1 (setf coord value)
+     (coord-push-owner coord self)
+     (when buffer
+       (funcall buffer :redraw-cell +no-value+ self))))
+  (((setf colchar) (value) :writes (colchar) :reads (buffer))
+   (colchar-pop-owner colchar self)
+   (prog1 (setf colchar value)
+     (colchar-push-owner colchar self)
+     (when buffer
+       (funcall buffer :redraw-cell +no-value+ self))))
+
+  ((setv (x-value y-value chr-value fg-value bg-value) 
+         :writes (coord colchar) :reads (buffer))
+   (setf (coord-trigger-flag coord) nil
+         (colchar-trigger-flag colchar) nil)
+   (coord-setv coord x-value y-value)
+   (colchar-setv colchar chr-value fg-value bg-value)
+   (setf (coord-trigger-flag coord) t
+         (colchar-trigger-flag colchar) t)
+   (when buffer
+     (funcall buffer :redraw-cell +no-value+ self))
+   t)
+
+  (((setf buffer) (value) :writes (buffer))
+   (when buffer
+     (funcall buffer :pop-cell +no-value+ self))
+   (prog1 (setf buffer value)
+     (when buffer
+       (funcall buffer :push-cell +no-value+ self))))
+
+  ((trigger () :reads (buffer))
+   (when buffer
+     (funcall buffer :redraw-cell +no-value+ self)))
+
+  ((moved-p () :reads (coord))
+   (or (/= (coord-x coord) (coord-old-x coord))
+       (/= (coord-y coord) (coord-old-y coord))))
+  ((needs-clearing-p () :reads (coord colchar))
+   (and (colchar-old-visibility colchar)
+        (or (not (colchar-visibility colchar)) (moved-p))))
+  ((needs-drawing-p () :reads (coord colchar))
+   (and (colchar-visibility colchar)
+        (or (not (colchar-old-visibility colchar)) (moved-p)))))
+
+(defmacro cell-x (c)
+  `(coord-x (cell-coord ,c)))
+
+(defmacro cell-y (c)
+  `(coord-y (cell-coord ,c)))
+
+(defmacro cell-old-x (c)
+  `(coord-old-x (cell-coord ,c)))
+
+(defmacro cell-old-y (c)
+  `(coord-old-y (cell-coord ,c)))
+
+(defmacro cell-chr (c)
+  `(colchar-chr (cell-colchar ,c)))
+
+(defmacro cell-fg (c)
+  `(colchar-fg (cell-colchar ,c)))
+
+(defmacro cell-bg (c)
+  `(colchar-bg (cell-colchar ,c)))
+
+(defmacro cell-visibility (c)
+  `(colchar-visibility (cell-colchar ,c)))
+
+(defmacro cell-old-visibility (c)
+  `(colchar-old-visibility (cell-colchar ,c)))
 
