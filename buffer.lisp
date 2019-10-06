@@ -13,6 +13,11 @@
 (defmacro position-y (pos)
   `(cdr ,pos))
 
+(defun set-position (pos x y)
+  (setf (position-x pos) x
+        (position-y pos) y)
+  t)
+
 ;;;----------------------------------------------------------------------------
 
 (defun occupant-find-top (table pos priority-fn)
@@ -29,150 +34,167 @@
 
 ;;;----------------------------------------------------------------------------
 
-(defparameter *default-buffer-stream* *standard-output*)
-(defparameter *default-buffer-priority-fn* 
+(defparameter *default-stream* *standard-output*)
+(defparameter *default-stream-lock* (bt:make-lock))
+(defparameter *default-area-pos-x* 0)
+(defparameter *default-area-pos-y* 0)
+(defparameter *default-area-size-x* 80)
+(defparameter *default-area-size-y* 24)
+
+(defparameter *default-priority-fn* 
   (constantly nil)) ; latest added cell is at the top
-(defparameter *default-buffer-blank-fn* 
+(defparameter *default-blank-fn* 
   (lambda (x y)
     (declare (ignore x y))
     (values #\Space 7 0))) ; (values chr fg bg)
-(defparameter *default-buffer-displ-x* 0)
-(defparameter *default-buffer-displ-y* 0)
-(defparameter *default-buffer-screen-displ-x* 0)
-(defparameter *default-buffer-screen-displ-y* 0)
-(defparameter *default-buffer-screen-size-x* 80)
-(defparameter *default-buffer-screen-size-y* 24)
+(defparameter *default-displ-x* 0)
+(defparameter *default-displ-y* 0)
 
-(es:define-structure buffer
-  :parameters (&key (stream *default-buffer-stream*)
-                    (cell-priority-fn *default-buffer-priority-fn*)
-                    (blank-fn *default-buffer-blank-fn*)
-                    (displ-x *default-buffer-displ-x*)
-                    (displ-y *default-buffer-displ-y*)
-                    (screen-displ-x *default-buffer-screen-displ-x*)
-                    (screen-displ-y *default-buffer-screen-displ-y*)
-                    (screen-size-x *default-buffer-screen-size-x*)
-                    (screen-size-y *default-buffer-screen-size-y*))
-  :body-macros ((pos-on-screen-p (pos)
-                  `(and (>= (position-x ,pos) displ-x)
-                        (>= (position-y ,pos) displ-y)
-                        (< (position-x ,pos) (+ displ-x screen-size-x))
-                        (< (position-y ,pos) (+ displ-y screen-size-y)))))
-  :bindings ((pos-old (make-position 0 0)) (pos (make-position 0 0)) 
-             (id-table (make-hash-table :test 'equal)) 
-             (pos-occ-table (make-hash-table :test 'equal)) 
-             (pos-redraw-table (make-hash-table :test 'equal)) 
-             full-redraw-p cell-priority-fn-changed-p blank-fn-changed-p 
-             (new-displ-x displ-x) 
-             (new-displ-y displ-y) 
-             (new-screen-displ-x screen-displ-x) 
-             (new-screen-displ-y screen-displ-y) 
-             (new-screen-size-x screen-size-x) (new-screen-size-y))
-  :getters (stream cell-priority-fn blank-fn displ-x displ-y
-            screen-displ-x screen-displ-y screen-size-x screen-size-y
-            (cells ()
-              (alexandria:hash-table-values id-table))
-            (refresh ()
-              (setf full-redraw-p t))
-            (redraw ()
-              (when (or full-redraw-p blank-fn-changed-p 
-                        (/= new-displ-x displ-x)
-                        (/= new-displ-y displ-y)
-                        (/= new-screen-displ-x screen-displ-x) 
-                        (/= new-screen-displ-y screen-displ-y) 
-                        (/= new-screen-size-x screen-size-x) 
-                        (/= new-screen-size-y screen-size-y))
-                (setf full-redraw-p nil blank-fn-changed-p nil
-                      displ-x new-displ-x displ-y new-displ-y
-                      screen-displ-x new-screen-displ-x 
-                      screen-displ-y new-screen-displ-y
-                      screen-size-x new-screen-size-x 
-                      screen-size-y new-screen-size-y)
-                (loop :for y 
-                      :from displ-y :below (+ displ-y screen-size-y)
-                      :do
-                      (setf (position-y pos) y)
-                      (loop :for x 
-                            :from displ-x :below (+ displ-x screen-size-x)
-                            :do
-                            (setf (position-x pos) x 
-                                  (gethash pos pos-redraw-table) t))))
-              (maphash 
-                (lambda (id cell)
-                  (let ((needs-unregistration-p 
-                          (cell-needs-unregistration-p cell))
-                        (needs-registration-p 
-                          (cell-needs-registration-p cell))
-                        (needs-clearing-p (cell-needs-clearing-p cell))
-                        (needs-drawing-p (cell-needs-drawing-p cell))
-                        (moved-p (cell-moved-p cell)))
-                    (setf (position-x pos-old) (cell-x cell) 
-                          (position-y pos-old) (cell-y cell))
-                    (cell-update cell)
-                    (setf (position-x pos) (cell-x cell) 
-                          (position-y pos) (cell-y cell))
-                    (when needs-unregistration-p
-                      (remhash id id-table)
-                      #1=(alexandria:deletef (gethash pos-old pos-occ-table)
-                                             cell :test #'eq))
-                    (when needs-registration-p
-                      #2=(push cell (gethash pos pos-occ-table)))
-                    (when needs-clearing-p
-                      (when (pos-on-screen-p pos-old)
-                        (setf (gethash pos-old pos-redraw-table) t)))
-                    (when needs-drawing-p
-                      (when (pos-on-screen-p pos)
-                        (setf (gethash pos pos-redraw-table) t)))
-                    (when moved-p
-                      #1#
-                      #2#)))
-                id-table)
-              (alexandria:maphash-keys 
-                (lambda (pos)
-                  (alexandria:if-let ((cell (occupant-find-top 
-                                              pos-occ-table pos 
-                                              cell-priority-fn)))
-                    (put-character 
-                      stream 
-                      (+ screen-displ-x (- (position-x pos) displ-x)) 
-                      (+ screen-displ-y (- (position-y pos) displ-y)) 
-                      (cell-fg cell) (cell-bg cell) (cell-chr cell))
-                    (multiple-value-bind (chr fg bg) 
-                        (multiple-value-call blank-fn 
-                          (position-x pos) (position-y pos))
-                      (put-character
-                        stream 
-                        (+ screen-displ-x (- (position-x pos) displ-x)) 
-                        (+ screen-displ-y (- (position-y pos) displ-y)) 
-                        fg bg chr)))
-                  (remhash pos pos-redraw-table))
-                pos-redraw-table)
-              (force-output stream)
-              t))
-  :setters ((cell-priority-fn ()
-              (setf cell-priority-fn-changed-p t
-                    cell-priority-fn es:value))
-            (blank-fn ()
-              (setf blank-fn-changed-p t
-                    blank-fn es:value))
-            (displ-x ()
-              (setf new-displ-x es:value))
-            (displ-y ()
-              (setf new-displ-y es:value))
-            (screen-displ-x ()
-              (when (>= es:value 0)
-                (setf new-screen-displ-x es:value)))
-            (screen-displ-y ()
-              (when (>= es:value 0)
-                (setf new-screen-displ-y es:value)))
-            (screen-size-x ()
-              (when (>= es:value 0)
-                (setf new-screen-size-x es:value)))
-            (screen-size-y ()
-              (when (>= es:value 0)
-                (setf new-screen-size-y es:value)))
-            (register-cell ()
-              (setf (gethash (cell-id es:value) id-table) es:value))
-            (unregister-cell ()
-              (remhash (cell-id es:value) id-table))))
- 
+(cl-mas:define-entity buffer
+    (&key (stream *default-stream*) (stream-lock *default-stream-lock*)
+          (area-pos-x *default-area-pos-x*) 
+          (area-pos-y *default-area-pos-y*)
+          (area-size-x *default-area-size-x*) 
+          (area-size-y *default-area-size-y*)
+          (priority-fn *default-priority-fn*) 
+          (blank-fn *default-blank-fn*)
+          (displ-x *default-displ-x*) (displ-y *default-displ-y*)
+     &aux (pos (make-position 0 0)) (pos-old (make-position 0 0))
+          (cell-table (make-hash-table :test 'eq)) 
+          (occ-table (make-hash-table :test 'equal))
+          (flag-table (make-hash-table :test 'equal)) full-redraw-flag
+          (new-displ-x displ-x) (new-displ-y displ-y))
+    (:declarations
+      ((type stream stream)
+       (type bt:lock stream-lock)
+       (type (integer 0 *) area-pos-x area-pos-y)
+       (type (integer 1 *) area-size-x area-size-y)
+       (type (function (cell cell) boolean) priority-fn)
+       (type (function (fixnum fixnum) (values character color color)))
+       (type fixnum displ-x displ-y new-displ-x new-displ-y)
+       (type (cons fixnum fixnum) pos pos-old)
+       (type hash-table cell-table occ-table flag-table)
+       (type boolean full-redraw-flag)))
+
+  ((stream ()) (values stream stream-lock))
+
+  ((area-pos-x () :reads (area)) area-pos-x)
+  ((area-pos-y () :reads (area)) area-pos-y)
+  ((area-size-x () :reads (area)) area-size-x)
+  ((area-size-y () :reads (area)) area-size-y)
+  ((set-area (&key pos-x pos-y size-x size-y) :writes (area full-redraw-flag))
+   (let ((pos-x (or pos-x area-pos-x)) (pos-y (or pos-y area-pos-y))
+         (size-x (or size-x area-size-x)) (size-y (or size-y area-size-y))) 
+     (setf area-pos-x pos-x area-pos-y pos-y
+           area-size-x size-x area-size-y size-y
+           full-redraw-flag t))
+   t)
+
+  priority-fn blank-fn
+  (((setf priority-fn) (value) :writes (priority-fn full-redraw-flag))
+   (setf full-redraw-flag t
+         priority-fn value))
+  (((setf blank-fn) (value) :writes (blank-fn full-redraw-flag))
+   (setf full-redraw-flag t
+         blank-fn value))
+
+  displ-x displ-y
+  (((setf displ-x) (value) :writes (new-displ-x))
+   (setf new-displ-x value))
+  (((setf displ-y) (value) :writes (new-displ-y))
+   (setf new-displ-y value))
+  ((set-displ (x-value y-value) :writes (new-displ-x new-displ-y))
+   (setf new-displ-x x-value
+         new-displ-y y-value)
+   t)
+
+  ((number-of-cells () :reads (cell-table))
+   (hash-table-count cell-table))
+  ((map-cells (fn) :reads (cell-table))
+   (alexandria:maphash-keys fn cell-table))
+
+  ((pos-in-area-p (pos) :reads (area displ-x displ-y) :visibility :private)
+   (and (>= (position-x pos) displ-x)
+        (>= (position-y pos) displ-y)
+        (< (position-x pos) (+ displ-x area-size-x))
+        (< (position-y pos) (+ displ-y area-size-y))))
+  ((flag-position (pos) :writes (flag-table) :calls (pos-in-area-p) 
+                  :visibility :private)
+   (when (pos-in-area-p pos)
+     (setf (gethash pos flag-table) t)))
+
+  (((setf push-cell) (cell) :writes (cell-table occ-table) 
+                     :calls (flag-position) :visibility :private)
+   (set-position pos (coord-x (cell-coord cell)) (coord-y (cell-coord cell)))
+   (push cell (gethash pos occ-table))
+   (setf (gethash cell cell-table) t)
+   (flag-position pos)
+   t)
+  (((setf pop-cell) (cell) :writes (cell-table occ-table) 
+                    :calls (flag-position) :visibility :private)
+   (set-position pos-old (coord-x (cell-coord cell)) 
+                 (coord-y (cell-coord cell)))
+   (unless (alexandria:deletef (gethash pos-old occ-table) cell :test #'eq)
+     (remhash pos-old occ-table))
+   (remhash cell cell-table)
+   (flag-position pos-old)
+   t)
+
+  ((redraw (&optional full) :writes (displ-x displ-y occ-table flag-table
+                                     full-redraw-flag) 
+           :reads (area priority-fn blank-fn new-displ-x new-displ-y 
+                   cell-table) :calls (pos-in-area-p flag-position))
+   (setf full-redraw-flag (or full full-redraw-flag
+                              (/= displ-x new-displ-x) 
+                              (/= displ-y new-displ-y))
+         displ-x new-displ-x displ-y new-displ-y)
+   (when full-redraw-flag
+     (clrhash flag-table)
+     (dotimes (y area-size-y)
+       (dotimes (x area-size-x)
+         (set-position pos (+ displ-x x) (+ displ-y y))
+         (flag-position pos)))
+     (setf full-redraw-flag nil))
+
+   (alexandria:maphash-keys
+     (lambda (cell)
+       (let ((needs-clearing-p (cell-needs-clearing-p cell))
+             (needs-drawing-p (cell-needs-drawing-p cell))
+             (moved-p (cell-moved-p cell)))
+         (set-position pos-old (coord-x (cell-coord cell)) 
+                       (coord-y (cell-coord cell)))
+         (cell-trigger cell t)
+         (set-position pos (coord-x (cell-coord cell)) 
+                       (coord-y (cell-coord cell)))
+         (when needs-clearing-p
+           (flag-position pos-old))
+         (when needs-drawing-p
+           (flag-position pos))
+         (when moved-p
+           (unless (alexandria:deletef (gethash pos-old occ-table) cell 
+                                       :test #'eq)
+             (remhash pos-old occ-table))
+           (push cell (gethash pos occ-table)))))
+     cell-table)
+
+   (bt:with-lock-held (stream-lock)
+     (alexandria:maphash-keys
+       (lambda (pos)
+         (when (pos-in-area-p pos)
+           (let (chr fg bg)
+             (alexandria:if-let ((cell (occupant-find-top occ-table pos 
+                                                          priority-fn)))
+               (setf chr (colchar-chr (cell-colchar cell))
+                     fg (colchar-fg (cell-colchar cell))
+                     bg (colchar-bg (cell-colchar cell)))
+               (multiple-value-bind (chr-value fg-value bg-value)
+                   (funcall blank-fn (position-x pos) (position-y pos))
+                 (setf chr chr-value fg fg-value bg bg-value)))
+             (put-character stream
+                            (+ area-pos-x (- (position-x pos) displ-x)) 
+                            (+ area-pos-y (- (position-y pos) displ-y)) 
+                            fg bg chr))))
+       flag-table))
+   (clrhash flag-table)
+   t))
+

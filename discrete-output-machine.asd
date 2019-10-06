@@ -7,11 +7,10 @@
   :author "Ivan Podmazov"
   :license  "MIT"
   :version "1.0.0"
-  :depends-on (#:alexandria #:cl-enhanced-structures)
+  :depends-on (#:alexandria #:cl-multiagent-system)
   :serial t
   :components ((:file "package")
                (:file "terminal-io" :depends-on ("package"))
-               (:file "cell" :depends-on ("terminal-io"))
-               (:file "multicell" :depends-on ("cell"))
-               (:file "buffer" :depends-on ("cell"))))
+               (:file "cell" :depends-on ("package"))
+               (:file "buffer" :depends-on ("cell" "terminal-io"))))
 
