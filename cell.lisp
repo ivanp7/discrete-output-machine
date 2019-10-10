@@ -20,7 +20,7 @@
    t)
 
   ((changed-p () :reads (x y new-x new-y))
-   (or (/= x new-x) (/= y new-y)))
+   (or (not (eql x new-x)) (not (eql y new-y))))
   ((trigger (&optional force) :writes (x y) :reads (new-x new-y owners))
    (when (or (null owners) force)
      (setf x new-x y new-y)
@@ -35,11 +35,11 @@
   ((owned-p () :reads (owners))
    (not (null owners))))
 
-(deftype color () '(integer 0 255))
+(deftype color () '(or null (integer 0 255)))
 
 (defparameter *default-chr* #\█)
 (defparameter *default-fg* 7)
-(defparameter *default-bg* 0)
+(defparameter *default-bg* nil)
 
 (cl-mas:define-entity colchar
     (&optional (chr *default-chr*) (fg *default-fg*) (bg *default-bg*) 
@@ -60,7 +60,7 @@
    t)
 
   ((changed-p () :reads (chr fg bg new-chr new-fg new-bg))
-   (or (char/= chr new-chr) (/= fg new-fg) (/= bg new-bg)))
+   (or (char/= chr new-chr) (not (eql fg new-fg)) (not (eql bg new-bg))))
   ((trigger (&optional force) :writes (chr fg bg) 
             :reads (new-chr new-fg new-bg))
    (when (or (null owners) force)
