@@ -46,7 +46,7 @@
 (defparameter *default-blank-fn* 
   (lambda (x y)
     (declare (ignore x y))
-    (values #\Space 7 0))) ; (values chr fg bg)
+    (values #\Space 7 nil))) ; (values chr fg bg)
 (defparameter *default-displ-x* 0)
 (defparameter *default-displ-y* 0)
 
