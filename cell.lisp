@@ -107,10 +107,10 @@
    (setf new-visibility value))
   (((setf buffer) (value) :writes (buffer))
    (when buffer
-     (funcall buffer :pop-cell cl-mas:self))
+     (cl-mas:entity-accessor :pop-cell buffer cl-mas:self))
    (trigger t)
    (prog1 (setf buffer value)
-     (funcall buffer :push-cell cl-mas:self)))
+     (cl-mas:entity-accessor :push-cell buffer cl-mas:self)))
 
   ((changed-p () :reads (coord colchar visibility new-visibility))
    (or (not (eql visibility new-visibility)) 
