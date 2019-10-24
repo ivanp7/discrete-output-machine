@@ -118,8 +118,7 @@
         (>= (position-y pos) displ-y)
         (< (position-x pos) (+ displ-x area-size-x))
         (< (position-y pos) (+ displ-y area-size-y))))
-  ((flag-position (pos) :writes (flag-table) :calls (pos-in-area-p) 
-                  :visibility :private)
+  ((flag-position (pos) :writes (flag-table) :calls (pos-in-area-p))
    (when (pos-in-area-p pos)
      (setf (gethash pos flag-table) t)))
 

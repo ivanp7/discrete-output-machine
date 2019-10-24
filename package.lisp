@@ -34,5 +34,6 @@
            :buffer-area-size-x :buffer-area-size-y :buffer-set-area
            :buffer-priority-fn :buffer-blank-fn 
            :buffer-displ-x :buffer-displ-y :buffer-set-displ
-           :buffer-number-of-cells :buffer-map-cells :buffer-redraw))
+           :buffer-number-of-cells :buffer-map-cells 
+           :buffer-flag-position :buffer-redraw))
 
